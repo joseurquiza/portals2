@@ -1,0 +1,7 @@
+{
+  "name": "PORTALS",
+  "description": "A high-end multi-agent AI voice system featuring beautiful, animated liquid portal interfaces powered by Gemini Live API.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
