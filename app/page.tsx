@@ -174,6 +174,8 @@ const App: React.FC = () => {
   );
   const [showPersonalityEditor, setShowPersonalityEditor] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [personResearchName, setPersonResearchName] = useState('');
+  const [researchingPerson, setResearchingPerson] = useState(false);
   
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
@@ -905,6 +907,79 @@ Format in markdown with headers (##) and bullet points.`;
     }
   };
 
+  const researchPersonAsAgent = async (agentId: string) => {
+    if (!personResearchName.trim() || researchingPerson) return;
+    
+    const agent = AGENTS.find(a => a.id === agentId);
+    if (!agent) return;
+    
+    setResearchingPerson(true);
+    console.log(`[v0] Researching ${personResearchName} as board member for ${agent.name} role`);
+    pushLog('SYSTEM', 'INFO', `Researching ${personResearchName}'s board member profile...`);
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+      
+      const prompt = `Research ${personResearchName} to understand how they would act as a ${agent.name} (${agent.description}) on a corporate board of directors.
+
+Conduct DEEP research on:
+1. Their actual decision-making patterns and philosophy
+2. How they approach problems in their domain (${agent.description})
+3. Their communication style and rhetoric
+4. Their known positions, beliefs, and perspectives
+5. How they interact with others in professional settings
+6. Their track record of decisions and outcomes
+7. Their strengths and potential blind spots
+8. Specific quirks, habits, or signature approaches
+
+For example, if researching Peter Thiel:
+- His contrarian thinking and "zero to one" philosophy
+- Focus on monopolies and competition avoidance
+- Long-term thinking and patient capital approach
+- Libertarian leanings and skepticism of regulation
+- Direct, sometimes provocative communication style
+- Emphasis on technology and disruption
+- Known for asking unconventional questions
+
+Generate a detailed personality profile (200-300 words) that captures:
+- HOW they would contribute in their role as ${agent.name}
+- WHAT questions they would ask
+- HOW they would challenge or support other board members
+- WHAT their priorities and concerns would be
+- Their unique perspective and decision-making framework
+
+Make it specific and actionable for AI agent behavior. Include actual quotes or known positions when relevant.`;
+
+      console.log(`[v0] Sending research request to Gemini 3...`);
+      const result = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt
+      });
+      
+      const personalityProfile = result.text || 'Research unavailable';
+      console.log(`[v0] Research complete for ${personResearchName}`);
+      console.log(`[v0] Profile length: ${personalityProfile.length} chars`);
+      
+      // Update agent personality with researched profile
+      setAgentPersonalities(prev => 
+        prev.map(p => 
+          p.agentId === agentId 
+            ? { ...p, customTraits: personalityProfile, presetId: 'custom' }
+            : p
+        )
+      );
+      
+      pushLog('SYSTEM', 'SUCCESS', `${personResearchName} profile applied to ${agent.name}`);
+      setPersonResearchName('');
+      
+    } catch (e: any) {
+      console.error(`[v0] Research failed:`, e);
+      pushLog('SYSTEM', 'ERROR', `Research failed: ${e.message}`);
+    } finally {
+      setResearchingPerson(false);
+    }
+  };
+
   const startRoundtable = async (topic: string) => {
     if (!topic.trim()) return;
     
@@ -1232,6 +1307,35 @@ Format in markdown with headers (##) and bullet points.`;
                     <p className="text-xs text-white/50 mb-3 h-8">
                       {preset?.description}
                     </p>
+                    
+                    {/* Research Real Person */}
+                    {editingAgentId === agent.id && (
+                      <div className="mb-3 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                        <label className="text-xs text-purple-300 font-semibold block mb-2">
+                          Research Real Person
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={personResearchName}
+                            onChange={(e) => setPersonResearchName(e.target.value)}
+                            placeholder="e.g., Peter Thiel, Elon Musk..."
+                            className="flex-1 bg-white/10 border border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500 transition"
+                            disabled={researchingPerson}
+                          />
+                          <button
+                            onClick={() => researchPersonAsAgent(agent.id)}
+                            disabled={!personResearchName.trim() || researchingPerson}
+                            className="bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 font-semibold px-3 py-1.5 rounded text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {researchingPerson ? 'Researching...' : 'Research'}
+                          </button>
+                        </div>
+                        <p className="text-xs text-white/40 mt-1">
+                          AI will deeply research this person's decision-making style and board behavior
+                        </p>
+                      </div>
+                    )}
 
                     {isEditing ? (
                       <div className="space-y-2">
