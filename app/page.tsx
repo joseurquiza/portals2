@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, Type, FunctionDeclaration } from '@google/genai';
-import { ConnectionStatus, TranscriptionItem, AgentConfig } from '../types';
+import { ConnectionStatus, TranscriptionItem, AgentConfig, RoundtableSession, RoundtableResearch, RoundtableDiscussion } from '../types';
 import { decode, encode, decodeAudioData } from '../utils/audioUtils';
 import { supabase as initialSupabase } from '../supabaseClient';
 import LiquidPortal from '../components/LiquidPortal';
@@ -86,12 +86,15 @@ const App: React.FC = () => {
   });
   
   const [showConfig, setShowConfig] = useState(!config.supabaseUrl);
-  const [view, setView] = useState<'home' | 'portal'>('home');
+  const [view, setView] = useState<'home' | 'portal' | 'roundtable'>('home');
   const [activeAgent, setActiveAgent] = useState<AgentConfig>(AGENTS[0]);
   const [collaborators, setCollaborators] = useState<AgentConfig[]>([]);
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  
+  const [roundtableSession, setRoundtableSession] = useState<RoundtableSession | null>(null);
+  const [showRoundtableInput, setShowRoundtableInput] = useState(false);
   
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
   const [intensity, setIntensity] = useState(0);
@@ -431,9 +434,218 @@ const App: React.FC = () => {
     setCollaborators([]);
     setFocusedAgentId(null);
     setSessionId(null);
+    setRoundtableSession(null);
     setView('home');
     pushLog('SYSTEM', 'INFO', 'Neural Cluster Shut Down.');
   }, [pushLog]);
+
+  const startRoundtable = async (topic: string) => {
+    if (!topic.trim()) return;
+    
+    setView('roundtable');
+    setShowRoundtableInput(false);
+    pushLog('SYSTEM', 'INFO', `Starting Roundtable: ${topic}`);
+    
+    const newSession: RoundtableSession = {
+      topic,
+      research: AGENTS.map(agent => ({
+        agentId: agent.id,
+        findings: '',
+        timestamp: Date.now(),
+        status: 'researching'
+      })),
+      discussions: [],
+      summary: null,
+      status: 'researching',
+      startTime: Date.now()
+    };
+    
+    setRoundtableSession(newSession);
+    setStatus(ConnectionStatus.CONNECTING);
+    
+    // Initialize audio context if needed
+    if (!audioCtxRef.current) {
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      audioCtxRef.current = ctx;
+      const masterOut = ctx.createGain();
+      masterOut.connect(ctx.destination);
+      masterOutputRef.current = masterOut;
+    }
+    
+    // Conduct research phase
+    await conductResearch(topic);
+  };
+
+  const conductResearch = async (topic: string) => {
+    pushLog('SYSTEM', 'INFO', 'All agents researching topic...');
+    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+    
+    // Each agent does independent research
+    const researchPromises = AGENTS.map(async (agent) => {
+      try {
+        const prompt = `You are ${agent.name}. ${agent.description}
+
+Research this topic from your unique perspective: "${topic}"
+
+Provide your key findings in 2-3 sentences. Focus on insights relevant to your specialty.`;
+
+        const model = ai.generativeModel({ model: 'gemini-2.0-flash' });
+        const result = await model.generateContent(prompt);
+        const findings = result.response.text();
+        
+        setRoundtableSession(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            research: prev.research.map(r => 
+              r.agentId === agent.id 
+                ? { ...r, findings, status: 'complete' as const }
+                : r
+            )
+          };
+        });
+        
+        pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
+        return { agentId: agent.id, findings };
+      } catch (e: any) {
+        pushLog('SYSTEM', 'ERROR', `${agent.name} research failed: ${e.message}`);
+        return { agentId: agent.id, findings: 'Research unavailable' };
+      }
+    });
+    
+    await Promise.all(researchPromises);
+    
+    // Move to discussion phase
+    setTimeout(() => startDiscussion(), 2000);
+  };
+
+  const startDiscussion = async () => {
+    if (!roundtableSession) return;
+    
+    setRoundtableSession(prev => prev ? { ...prev, status: 'discussing' } : null);
+    pushLog('SYSTEM', 'INFO', 'Agents entering discussion phase...');
+    setStatus(ConnectionStatus.CONNECTED);
+    
+    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+    
+    // Simulate discussion rounds
+    const discussionRounds = 3; // Each agent speaks once per round
+    
+    for (let round = 0; round < discussionRounds; round++) {
+      for (const agent of AGENTS) {
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Pause between speakers
+        
+        try {
+          const agentResearch = roundtableSession.research.find(r => r.agentId === agent.id);
+          const allResearch = roundtableSession.research
+            .map(r => `${AGENTS.find(a => a.id === r.agentId)?.name}: ${r.findings}`)
+            .join('\n\n');
+          
+          const recentDiscussions = roundtableSession.discussions
+            .slice(-5)
+            .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
+            .join('\n');
+          
+          const prompt = `You are ${agent.name} in a roundtable discussion about: "${roundtableSession.topic}"
+
+Your research: ${agentResearch?.findings}
+
+All research findings:
+${allResearch}
+
+Recent discussion:
+${recentDiscussions || 'Discussion just starting'}
+
+This is discussion round ${round + 1} of ${discussionRounds}. ${
+  round === 0 ? 'Share your perspective and react to others\' research.' :
+  round === 1 ? 'Build on what others said and add deeper insights.' :
+  'Synthesize the discussion and offer final thoughts.'
+}
+
+Respond in 1-2 sentences. Be conversational and reference others' points.`;
+
+          const model = ai.generativeModel({ model: 'gemini-2.0-flash' });
+          const result = await model.generateContent(prompt);
+          const message = result.response.text();
+          
+          const newDiscussion: RoundtableDiscussion = {
+            fromAgentId: agent.id,
+            toAgentId: null,
+            message,
+            timestamp: Date.now()
+          };
+          
+          setRoundtableSession(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              discussions: [...prev.discussions, newDiscussion]
+            };
+          });
+          
+          setFocusedAgentId(agent.id);
+          pushLog('SYSTEM', 'INFO', `${agent.name} speaking...`);
+          
+        } catch (e: any) {
+          pushLog('SYSTEM', 'ERROR', `${agent.name} discussion error: ${e.message}`);
+        }
+      }
+    }
+    
+    // Move to summary phase
+    setTimeout(() => generateSummary(), 1000);
+  };
+
+  const generateSummary = async () => {
+    if (!roundtableSession) return;
+    
+    setRoundtableSession(prev => prev ? { ...prev, status: 'summarizing' } : null);
+    pushLog('SYSTEM', 'INFO', 'Oracle generating summary...');
+    setFocusedAgentId('oracle');
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+      
+      const allResearch = roundtableSession.research
+        .map(r => `${AGENTS.find(a => a.id === r.agentId)?.name}: ${r.findings}`)
+        .join('\n\n');
+      
+      const allDiscussions = roundtableSession.discussions
+        .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
+        .join('\n\n');
+      
+      const prompt = `You are Oracle, synthesizing a roundtable discussion on: "${roundtableSession.topic}"
+
+RESEARCH FINDINGS:
+${allResearch}
+
+DISCUSSION:
+${allDiscussions}
+
+Provide a comprehensive summary that:
+1. Captures key insights from each agent's unique perspective
+2. Highlights areas of consensus and creative tension
+3. Offers actionable takeaways
+4. Uses clear section headers
+
+Format in markdown with headers (##) and bullet points.`;
+
+      const model = ai.generativeModel({ model: 'gemini-2.0-flash' });
+      const result = await model.generateContent(prompt);
+      const summary = result.response.text();
+      
+      setRoundtableSession(prev => {
+        if (!prev) return null;
+        return { ...prev, summary, status: 'complete' };
+      });
+      
+      pushLog('SYSTEM', 'SUCCESS', 'Roundtable complete!');
+      setStatus(ConnectionStatus.IDLE);
+      
+    } catch (e: any) {
+      pushLog('SYSTEM', 'ERROR', `Summary generation failed: ${e.message}`);
+    }
+  };
 
   useEffect(() => {
     if (transcriptionContainerRef.current) transcriptionContainerRef.current.scrollTop = transcriptionContainerRef.current.scrollHeight;
@@ -558,12 +770,54 @@ const App: React.FC = () => {
             ))}
           </div>
           
-          <button 
-            onClick={() => setShowConfig(true)}
-            className="mt-12 text-sm text-white/40 hover:text-white/80 transition underline"
-          >
-            Configure Database
-          </button>
+          <div className="mt-12 flex gap-4 items-center">
+            <button 
+              onClick={() => setShowRoundtableInput(true)}
+              className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold rounded-full transition-all shadow-lg hover:shadow-purple-500/50"
+            >
+              Start Roundtable
+            </button>
+            <button 
+              onClick={() => setShowConfig(true)}
+              className="text-sm text-white/40 hover:text-white/80 transition underline"
+            >
+              Configure Database
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Roundtable Input Modal */}
+      {showRoundtableInput && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-2xl w-full shadow-2xl">
+            <h2 className="text-2xl font-bold mb-4 font-outfit">Start a Roundtable Discussion</h2>
+            <p className="text-sm text-white/60 mb-6">
+              All five agents will research your topic, discuss their findings with each other, and provide a comprehensive summary.
+            </p>
+            <textarea
+              placeholder="Enter your topic or question..."
+              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-6 h-32 focus:outline-none focus:border-cyan-500 transition resize-none"
+              id="roundtable-topic"
+            />
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  const input = document.getElementById('roundtable-topic') as HTMLTextAreaElement;
+                  if (input?.value.trim()) startRoundtable(input.value);
+                }}
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold py-3 rounded-lg transition"
+              >
+                Begin Roundtable
+              </button>
+              <button 
+                onClick={() => setShowRoundtableInput(false)}
+                className="px-6 bg-white/10 hover:bg-white/20 rounded-lg transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -665,6 +919,195 @@ const App: React.FC = () => {
                   <div className="text-sm">{item.text}</div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ROUNDTABLE VIEW */}
+      {view === 'roundtable' && roundtableSession && (
+        <div className="flex flex-col min-h-screen">
+          {/* Header */}
+          <div className="bg-black/40 backdrop-blur-md border-b border-white/10 p-6">
+            <div className="max-w-7xl mx-auto flex items-center justify-between">
+              <div className="flex-1">
+                <h1 className="text-3xl font-bold font-outfit mb-2 bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+                  Roundtable Discussion
+                </h1>
+                <p className="text-white/60">{roundtableSession.topic}</p>
+              </div>
+              <button 
+                onClick={terminateAll}
+                className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 font-semibold px-6 py-2 rounded-lg transition"
+              >
+                End Session
+              </button>
+            </div>
+          </div>
+
+          {/* Status Banner */}
+          <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-b border-white/10 px-6 py-3">
+            <div className="max-w-7xl mx-auto flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                {roundtableSession.status === 'researching' && (
+                  <>
+                    <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />
+                    <span className="text-sm font-semibold text-cyan-400">Researching...</span>
+                  </>
+                )}
+                {roundtableSession.status === 'discussing' && (
+                  <>
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+                    <span className="text-sm font-semibold text-purple-400">Discussing...</span>
+                  </>
+                )}
+                {roundtableSession.status === 'summarizing' && (
+                  <>
+                    <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
+                    <span className="text-sm font-semibold text-yellow-400">Generating Summary...</span>
+                  </>
+                )}
+                {roundtableSession.status === 'complete' && (
+                  <>
+                    <div className="w-2 h-2 bg-emerald-400 rounded-full" />
+                    <span className="text-sm font-semibold text-emerald-400">Complete</span>
+                  </>
+                )}
+              </div>
+              <div className="text-xs text-white/40">
+                {Math.floor((Date.now() - roundtableSession.startTime) / 1000)}s elapsed
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            <div className="max-w-7xl mx-auto p-6 space-y-6">
+              
+              {/* Research Phase */}
+              <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6">
+                <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                  <span className="text-2xl">🔍</span>
+                  Research Phase
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {roundtableSession.research.map((research) => {
+                    const agent = AGENTS.find(a => a.id === research.agentId);
+                    if (!agent) return null;
+                    return (
+                      <div 
+                        key={research.agentId}
+                        className={`bg-white/5 border ${research.status === 'complete' ? 'border-emerald-500/50' : 'border-white/10'} rounded-xl p-4 transition-all`}
+                      >
+                        <div className="flex items-center gap-2 mb-3">
+                          <div 
+                            className={`w-3 h-3 rounded-full ${agent.colors.primary}`}
+                            style={{boxShadow: `0 0 10px ${agent.colors.glow}`}}
+                          />
+                          <span className="font-bold">{agent.name}</span>
+                          {research.status === 'researching' && (
+                            <div className="ml-auto">
+                              <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                            </div>
+                          )}
+                          {research.status === 'complete' && (
+                            <div className="ml-auto text-emerald-400">✓</div>
+                          )}
+                        </div>
+                        <p className="text-sm text-white/70">
+                          {research.findings || 'Researching...'}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Discussion Phase */}
+              {roundtableSession.discussions.length > 0 && (
+                <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6">
+                  <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                    <span className="text-2xl">💬</span>
+                    Discussion
+                  </h2>
+                  <div className="space-y-3">
+                    {roundtableSession.discussions.map((discussion, idx) => {
+                      const agent = AGENTS.find(a => a.id === discussion.fromAgentId);
+                      if (!agent) return null;
+                      return (
+                        <div 
+                          key={idx}
+                          className={`bg-gradient-to-r from-white/5 to-transparent border-l-4 rounded-lg p-4 transition-all ${
+                            focusedAgentId === agent.id ? 'border-l-white/80 scale-[1.02]' : 'border-l-white/20'
+                          }`}
+                          style={{
+                            borderLeftColor: focusedAgentId === agent.id ? agent.colors.glow : undefined
+                          }}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <div 
+                              className={`w-2 h-2 rounded-full ${agent.colors.primary}`}
+                              style={{boxShadow: `0 0 8px ${agent.colors.glow}`}}
+                            />
+                            <span className="font-semibold text-sm">{agent.name}</span>
+                            <span className="text-xs text-white/40 ml-auto">
+                              {new Date(discussion.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <p className="text-white/80">{discussion.message}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Summary Phase */}
+              {roundtableSession.summary && (
+                <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 backdrop-blur-sm border border-purple-500/30 rounded-2xl p-6">
+                  <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                    <span className="text-2xl">📋</span>
+                    Oracle's Summary
+                  </h2>
+                  <div className="prose prose-invert prose-sm max-w-none">
+                    <div 
+                      className="text-white/90 whitespace-pre-wrap"
+                      dangerouslySetInnerHTML={{
+                        __html: roundtableSession.summary
+                          .replace(/^## /gm, '<h3 class="text-lg font-bold mt-4 mb-2 text-purple-300">')
+                          .replace(/\n## /g, '</h3>\n<h3 class="text-lg font-bold mt-4 mb-2 text-purple-300">')
+                          .replace(/^- /gm, '• ')
+                          .replace(/\n- /g, '\n• ')
+                          + '</h3>'
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Agent Visualizations */}
+              {(roundtableSession.status === 'discussing' || roundtableSession.status === 'summarizing') && (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  {AGENTS.map(agent => (
+                    <div 
+                      key={agent.id}
+                      className={`flex flex-col items-center transition-all ${
+                        focusedAgentId === agent.id ? 'scale-110' : 'scale-90 opacity-50'
+                      }`}
+                    >
+                      <LiquidPortal 
+                        isListening={roundtableSession.status !== 'complete'}
+                        isSpeaking={focusedAgentId === agent.id}
+                        isFocused={focusedAgentId === agent.id}
+                        intensity={focusedAgentId === agent.id ? 0.7 : 0.2}
+                        colors={agent.colors}
+                        size="sm"
+                      />
+                      <span className="text-xs mt-2 font-semibold">{agent.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
             </div>
           </div>
         </div>
