@@ -415,13 +415,15 @@ const App: React.FC = () => {
                  if (detected && detected.id !== agent.id) setFocusedAgentId(detected.id);
               }
 
-              setTranscriptions(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.type === 'model' && last.agentId === agent.id) {
-                  return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-                }
-                return [...prev, { type: 'model', text, agentId: agent.id }];
-              });
+              if (text) {
+                setTranscriptions(prev => {
+                  const last = prev[prev.length - 1];
+                  if (last?.type === 'model' && last.agentId === agent.id) {
+                    return [...prev.slice(0, -1), { ...last, text: last.text + text }];
+                  }
+                  return [...prev, { type: 'model', text, agentId: agent.id }];
+                });
+              }
             }
 
             if (message.serverContent?.inputTranscription) {
