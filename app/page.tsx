@@ -942,7 +942,7 @@ FORBIDDEN:
         },
       });
       
-      sessionsRef.current.set(agent.id, sessionPromise);
+      sessionsRef.current.set(agent.id, { agentId: agent.id, promise: sessionPromise });
       console.log(`[v0] ${agent.name} session created successfully`);
       
     } catch (error: any) {
@@ -955,23 +955,12 @@ FORBIDDEN:
     if (!roundtableSession || !sessionsRef.current.has('oracle')) return;
     
     console.log('[v0] Chairman initiating discussion...');
-    const chairmanSession = await sessionsRef.current.get('oracle');
-    if (chairmanSession) {
-      // Chairman opens and immediately calls on CTO
+    const chairmanSessionObj = sessionsRef.current.get('oracle');
+    if (chairmanSessionObj) {
+      const chairmanSession = await chairmanSessionObj.promise;
       chairmanSession.sendRealtimeInput({
-        text: `Welcome board members. Today's topic: "${roundtableSession.topic}". Based on the research, this has significant strategic implications. CTO, from a technology perspective, what's your assessment?`
+        text: `Welcome board members. Let's begin our discussion on: "${roundtableSession.topic}". As Chairman, I'll start by sharing my perspective, then I'd like to hear from each of you. Let me open with my thoughts based on the research...`
       });
-      
-      // After 8 seconds, prompt the next person if no one has spoken
-      setTimeout(() => {
-        const ctoSession = sessionsRef.current.get('architect');
-        if (ctoSession) {
-          ctoSession.then(s => {
-            console.log('[v0] Prompting CTO to speak...');
-            // This gives CTO a nudge if they haven't responded
-          });
-        }
-      }, 8000);
     }
   };
   
@@ -981,8 +970,8 @@ FORBIDDEN:
     setIsDiscussionRunning(false);
     
     // Close all agent sessions
-    for (const [agentId, sessionPromise] of sessionsRef.current.entries()) {
-      const session = await sessionPromise;
+    for (const [agentId, sessionObj] of sessionsRef.current.entries()) {
+      const session = await sessionObj.promise;
       session.close();
     }
     sessionsRef.current.clear();
