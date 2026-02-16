@@ -451,7 +451,7 @@ const App: React.FC = () => {
               if (currentOutputBuffer.trim()) { manifestMessage('model', currentOutputBuffer, agent.id); currentOutputBuffer = ""; }
             }
 
-            if (message.toolCall) {
+            if (message.toolCall?.functionCalls) {
               for (const fc of message.toolCall.functionCalls) {
                 if (fc.name === 'summonAgent') {
                   const { agentId } = fc.args as any;
