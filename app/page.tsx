@@ -1026,7 +1026,7 @@ FORBIDDEN:
       
       console.log('[v0] Discussion prompt sent to Chairman');
       
-      // After Chairman speaks, prompt each board member to contribute (SLOWER TIMING)
+      // After Chairman speaks, prompt each board member to contribute
       setTimeout(async () => {
         for (const agent of AGENTS.slice(1)) { // Skip Chairman (first agent)
           const agentSessionObj = sessionsRef.current.get(agent.id);
@@ -1037,20 +1037,10 @@ FORBIDDEN:
                 text: `${agent.name}, please share your perspective on "${roundtableSession.topic}" based on your research and expertise in ${agent.description}. Contribute to the discussion now.`
               });
               console.log(`[v0] Prompted ${agent.name} to contribute`);
-            }, AGENTS.indexOf(agent) * 45000); // Stagger by 45 seconds each (MUCH SLOWER)
+            }, AGENTS.indexOf(agent) * 15000); // Stagger by 15 seconds each
           }
         }
-      }, 30000); // Start prompting others after 30 seconds (was 20)
-      
-      // Auto-generate summary after all agents have had time to speak
-      const totalDiscussionTime = 30000 + (AGENTS.length * 45000) + 30000; // Initial delay + agent time + buffer
-      setTimeout(() => {
-        if (!shouldStopDiscussion && isDiscussionRunning) {
-          console.log('[v0] Discussion time complete, generating summary...');
-          stopDiscussion();
-          setTimeout(() => generateSummary(), 2000);
-        }
-      }, totalDiscussionTime);
+      }, 20000); // Start prompting others after 20 seconds
     }
   };
   
@@ -1077,12 +1067,6 @@ FORBIDDEN:
         status: 'stopped',
         end_time: new Date().toISOString()
       }).eq('id', roundtableDbId);
-    }
-    
-    // Generate summary even if stopped early
-    if (roundtableSession?.discussions && roundtableSession.discussions.length > 0) {
-      console.log('[v0] Generating summary for stopped discussion...');
-      setTimeout(() => generateSummary(), 1000);
     }
   };
 
