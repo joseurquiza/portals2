@@ -669,16 +669,20 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
     setFocusedAgentId(null);
     
-    // Save research to database
+    // Save research to database with queries
     if (roundtableDbId && supabase && roundtableSession) {
       console.log('[v0] Saving research to database...');
       try {
         for (const research of roundtableSession.research) {
           const agent = AGENTS.find(a => a.id === research.agentId);
+          // Reconstruct the query that was used
+          const query = `You are ${agent?.name}. ${agent?.description}\n\nResearch this topic from your unique perspective: "${roundtableSession.topic}"\n\nProvide your key findings in 2-3 sentences. Focus on insights relevant to your specialty.`;
+          
           await supabase.from('roundtable_research').insert({
             session_id: roundtableDbId,
             agent_id: research.agentId,
             agent_name: agent?.name || research.agentId,
+            query: query,
             findings: research.findings,
             status: research.status
           });
@@ -769,32 +773,10 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
       const agentSources = new Set<AudioBufferSourceNode>();
       let currentOutputBuffer = "";
       
+      // Audio output - only connect to master for user to hear
       const agentOutputGain = ctx.createGain();
       agentOutputNodesRef.current.set(agent.id, agentOutputGain);
       agentOutputGain.connect(masterOutputRef.current!);
-      
-      const agentInputMixer = ctx.createGain();
-      micGainRef.current!.connect(agentInputMixer);
-      
-      // Each agent hears all other agents
-      agentOutputNodesRef.current.forEach((otherOutput, otherId) => {
-        if (otherId !== agent.id) otherOutput.connect(agentInputMixer);
-      });
-      agentInputMixersRef.current.forEach((otherMixer, otherId) => {
-        if (otherId !== agent.id) agentOutputGain.connect(otherMixer);
-      });
-      agentInputMixersRef.current.set(agent.id, agentInputMixer);
-      
-      const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
-      scriptProcessor.onaudioprocess = (e) => {
-        const inputData = e.inputBuffer.getChannelData(0);
-        const int16 = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-        const pcmBlob: Blob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
-        sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
-      };
-      agentInputMixer.connect(scriptProcessor);
-      scriptProcessor.connect(ctx.destination);
       
       // Get agent's research for context
       const agentResearch = roundtableSession?.research.find(r => r.agentId === agent.id);
@@ -819,10 +801,11 @@ ${allResearch}
 
 ${personalityTraits ? `PERSONALITY: ${personalityTraits}\n\n` : ''}
 
-CRITICAL TURN-TAKING RULES - YOU MUST FOLLOW THESE EXACTLY:
-1. DO NOT speak unless:
-   - Someone directly says your name ("${agent.name}")
-   - You hear a natural pause of 3+ seconds
+DISCUSSION PROTOCOL:
+1. You WILL actively participate in this live discussion
+2. ${agent.id === 'oracle' ? 'As Chairman, you lead the discussion and should speak first to introduce the topic' : `Wait for the Chairman to introduce the topic, then contribute when it's relevant to your expertise`}
+3. When someone addresses you by name, respond directly
+4. Keep responses concise (15-30 seconds of speaking)
    - Someone asks a question related to your expertise area
    
 2. When you DO speak:
@@ -893,7 +876,7 @@ FORBIDDEN:
               // Save to discussion history
               const newDiscussion: RoundtableDiscussion = {
                 fromAgentId: agent.id,
-                toAgentId: null, // Will be parsed from text if addressing someone
+                toAgentId: null,
                 message: textContent,
                 timestamp: Date.now()
               };
@@ -915,6 +898,17 @@ FORBIDDEN:
                   message: textContent
                 });
               }
+              
+              // Broadcast transcript to all other agents so they know what was said
+              for (const [otherId, sessionObj] of sessionsRef.current.entries()) {
+                if (otherId !== agent.id) {
+                  const otherSession = await sessionObj.promise;
+                  otherSession.sendRealtimeInput({
+                    text: `[${agent.name} just said: "${textContent}"]`
+                  });
+                  console.log(`[v0] Sent transcript to ${AGENTS.find(a => a.id === otherId)?.name}`);
+                }
+              }
             }
             
             if (message.serverContent?.turnComplete) {
@@ -929,7 +923,6 @@ FORBIDDEN:
           onclose: () => {
             console.log(`[v0] ${agent.name} session closed`);
             agentSources.forEach(s => s.stop());
-            scriptProcessor.disconnect();
           }
         },
         config: {
@@ -958,9 +951,28 @@ FORBIDDEN:
     const chairmanSessionObj = sessionsRef.current.get('oracle');
     if (chairmanSessionObj) {
       const chairmanSession = await chairmanSessionObj.promise;
+      // Send a user message to trigger the Chairman to speak
       chairmanSession.sendRealtimeInput({
-        text: `Welcome board members. Let's begin our discussion on: "${roundtableSession.topic}". As Chairman, I'll start by sharing my perspective, then I'd like to hear from each of you. Let me open with my thoughts based on the research...`
+        text: `START THE BOARD DISCUSSION NOW. Welcome everyone and introduce the topic: "${roundtableSession.topic}". Share your opening perspective as Chairman based on your research, then invite others to contribute. BEGIN SPEAKING NOW.`
       });
+      
+      console.log('[v0] Discussion prompt sent to Chairman');
+      
+      // After Chairman speaks, prompt each board member to contribute
+      setTimeout(async () => {
+        for (const agent of AGENTS.slice(1)) { // Skip Chairman (first agent)
+          const agentSessionObj = sessionsRef.current.get(agent.id);
+          if (agentSessionObj) {
+            setTimeout(async () => {
+              const agentSession = await agentSessionObj.promise;
+              agentSession.sendRealtimeInput({
+                text: `${agent.name}, please share your perspective on "${roundtableSession.topic}" based on your research and expertise in ${agent.description}. Contribute to the discussion now.`
+              });
+              console.log(`[v0] Prompted ${agent.name} to contribute`);
+            }, AGENTS.indexOf(agent) * 15000); // Stagger by 15 seconds each
+          }
+        }
+      }, 20000); // Start prompting others after 20 seconds
     }
   };
   
