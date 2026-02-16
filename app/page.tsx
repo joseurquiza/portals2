@@ -410,7 +410,7 @@ const App: React.FC = () => {
               }
 
               // If they mention someone else substantially, shift focus (e.g., "Oracle, what do you think?")
-              if (text.trim().length > 3) {
+              if (text && text.trim().length > 3) {
                  const detected = AGENTS.find(a => text.toLowerCase().includes(a.name.toLowerCase()));
                  if (detected && detected.id !== agent.id) setFocusedAgentId(detected.id);
               }
