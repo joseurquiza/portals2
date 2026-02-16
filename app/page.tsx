@@ -1170,6 +1170,13 @@ Format in markdown with headers (##) and bullet points.`;
                   pushLog('SYSTEM', 'INFO', `Uploading ${files.length} file(s)...`);
                   
                   for (const file of files) {
+                    // Check file size on client side (50MB limit)
+                    const maxSize = 50 * 1024 * 1024;
+                    if (file.size > maxSize) {
+                      pushLog('SYSTEM', 'ERROR', `File too large: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB). Max 50MB.`);
+                      continue;
+                    }
+
                     const formData = new FormData();
                     formData.append('file', file);
                     formData.append('supabaseUrl', supabaseUrl);
@@ -1198,8 +1205,16 @@ Format in markdown with headers (##) and bullet points.`;
                           }
                         }
                       } else {
-                        const error = await res.json();
-                        pushLog('SYSTEM', 'ERROR', `Failed: ${file.name} - ${error.error || 'Unknown error'}`);
+                        // Try to parse JSON error, fallback to text
+                        let errorMessage = 'Unknown error';
+                        try {
+                          const error = await res.json();
+                          errorMessage = error.error || error.message || 'Unknown error';
+                        } catch {
+                          const text = await res.text();
+                          errorMessage = text.substring(0, 100);
+                        }
+                        pushLog('SYSTEM', 'ERROR', `Failed: ${file.name} - ${errorMessage}`);
                       }
                     } catch (err: any) {
                       console.error('[v0] Upload error:', err);
