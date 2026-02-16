@@ -670,7 +670,7 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     setFocusedAgentId(null);
     
     // Save research to database
-    if (roundtableDbId && supabase) {
+    if (roundtableDbId && supabase && roundtableSession) {
       console.log('[v0] Saving research to database...');
       try {
         for (const research of roundtableSession.research) {
