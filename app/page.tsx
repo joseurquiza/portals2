@@ -218,8 +218,8 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initSupabaseClient = async () => {
-      const supabaseUrl = typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_URL') : null;
-      const supabaseKey = typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_ANON_KEY') : null;
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       
       if (supabaseUrl && supabaseKey) {
         const { createClient } = await import('@supabase/supabase-js');
@@ -1152,8 +1152,8 @@ Format in markdown with headers (##) and bullet points.`;
                     onClick={async () => {
                       if (confirm(`Delete ${doc.filename}?`)) {
                         // Delete from database
-                        const supabaseUrl = localStorage.getItem('SUPABASE_URL');
-                        const supabaseKey = localStorage.getItem('SUPABASE_ANON_KEY');
+                        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+                        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
                         
                         if (supabaseUrl && supabaseKey) {
                           const { createClient } = await import('@supabase/supabase-js');
@@ -1177,8 +1177,8 @@ Format in markdown with headers (##) and bullet points.`;
               <button
                 onClick={async () => {
                   // Load existing documents
-                  const supabaseUrl = localStorage.getItem('SUPABASE_URL');
-                  const supabaseKey = localStorage.getItem('SUPABASE_ANON_KEY');
+                  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+                  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
                   
                   if (supabaseUrl && supabaseKey) {
                     const { createClient } = await import('@supabase/supabase-js');
