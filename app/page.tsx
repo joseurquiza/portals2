@@ -564,55 +564,6 @@ const App: React.FC = () => {
     pushLog('SYSTEM', 'INFO', 'Board session ended.');
   }, [pushLog]);
 
-  const startRoundtable = async (topic: string) => {
-    if (!topic.trim()) return;
-    
-    console.log('[v0] ROUNDTABLE SESSION INITIATED');
-    console.log('[v0] Topic:', topic);
-    console.log('[v0] Participants:', AGENTS.map(a => a.name).join(', '));
-    
-    setShowRoundtableInput(false);
-    pushLog('SYSTEM', 'INFO', `Starting roundtable on: ${topic}`);
-    setStatus(ConnectionStatus.CONNECTING);
-    
-    // Initialize roundtable session
-    const session: RoundtableSession = {
-      topic,
-      research: AGENTS.map(agent => ({
-        agentId: agent.id,
-        findings: '',
-        status: 'researching' as const
-      })),
-      discussions: [],
-      summary: '',
-      status: 'researching'
-    };
-    
-    console.log('[v0] Session initialized with', AGENTS.length, 'agents');
-    setRoundtableSession(session);
-    setView('roundtable');
-    
-    console.log('[v0] Starting research phase...');
-    // Conduct research phase
-    await conductResearch(topic);
-  };
-    
-    setRoundtableSession(newSession);
-    setStatus(ConnectionStatus.CONNECTING);
-    
-    // Initialize audio context if needed
-    if (!audioCtxRef.current) {
-      const ctx = new AudioContext({ sampleRate: 16000 });
-      audioCtxRef.current = ctx;
-      const masterOut = ctx.createGain();
-      masterOut.connect(ctx.destination);
-      masterOutputRef.current = masterOut;
-    }
-    
-    // Conduct research phase
-    await conductResearch(topic);
-  };
-
   const conductResearch = async (topic: string) => {
     console.log('[v0] RESEARCH PHASE STARTED');
     console.log('[v0] Topic:', topic);
@@ -835,6 +786,39 @@ Format in markdown with headers (##) and bullet points.`;
       console.error('[v0] Summary generation failed:', e);
       pushLog('SYSTEM', 'ERROR', `Summary generation failed: ${e.message}`);
     }
+  };
+
+  const startRoundtable = async (topic: string) => {
+    if (!topic.trim()) return;
+    
+    console.log('[v0] ROUNDTABLE SESSION INITIATED');
+    console.log('[v0] Topic:', topic);
+    console.log('[v0] Participants:', AGENTS.map(a => a.name).join(', '));
+    
+    setShowRoundtableInput(false);
+    pushLog('SYSTEM', 'INFO', `Starting roundtable on: ${topic}`);
+    setStatus(ConnectionStatus.CONNECTING);
+    
+    // Initialize roundtable session
+    const session: RoundtableSession = {
+      topic,
+      research: AGENTS.map(agent => ({
+        agentId: agent.id,
+        findings: '',
+        status: 'researching' as const
+      })),
+      discussions: [],
+      summary: '',
+      status: 'researching'
+    };
+    
+    console.log('[v0] Session initialized with', AGENTS.length, 'agents');
+    setRoundtableSession(session);
+    setView('roundtable');
+    
+    console.log('[v0] Starting research phase...');
+    // Conduct research phase
+    await conductResearch(topic);
   };
 
   useEffect(() => {
