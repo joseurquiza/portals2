@@ -5,6 +5,7 @@ import { PortalSignal } from '../types';
 interface LiquidPortalProps {
   isListening: boolean;
   isSpeaking: boolean;
+  isFocused?: boolean;
   intensity: number;
   colors: {
     primary: string;
@@ -19,6 +20,7 @@ interface LiquidPortalProps {
 const LiquidPortal: React.FC<LiquidPortalProps> = ({ 
   isListening, 
   isSpeaking, 
+  isFocused = false,
   intensity, 
   colors,
   size = 'lg',
@@ -57,9 +59,17 @@ const LiquidPortal: React.FC<LiquidPortalProps> = ({
         ))}
       </div>
 
+      {/* Focus Ring */}
+      {isFocused && (
+        <div 
+          className="absolute inset-[-20px] rounded-full border border-white/20 animate-pulse-slow"
+          style={{ boxShadow: `0 0 40px ${colors.glow}44`, border: `1px solid ${colors.glow}66` }}
+        />
+      )}
+
       {/* Background Glow */}
       <div 
-        className={`absolute inset-0 blur-[100px] rounded-full transition-all duration-1000 ${isListening || isSpeaking ? 'opacity-60 scale-150' : 'opacity-20 scale-100'}`}
+        className={`absolute inset-0 blur-[100px] rounded-full transition-all duration-1000 ${isListening || isSpeaking || isFocused ? 'opacity-60 scale-150' : 'opacity-20 scale-100'}`}
         style={{ backgroundColor: colors.glow }}
       />
 
@@ -82,8 +92,8 @@ const LiquidPortal: React.FC<LiquidPortalProps> = ({
         
         {/* Core Portal Element */}
         <div 
-          className="absolute inset-4 rounded-full bg-black/40 backdrop-blur-3xl border border-white/10 flex items-center justify-center shadow-inner"
-          style={{ boxShadow: `0 0 60px ${colors.glow}33` }}
+          className={`absolute inset-4 rounded-full bg-black/40 backdrop-blur-3xl border flex items-center justify-center shadow-inner transition-colors duration-500 ${isFocused ? 'border-white/30' : 'border-white/10'}`}
+          style={{ boxShadow: `0 0 60px ${colors.glow}${isFocused ? '55' : '33'}` }}
         >
           <div className="w-1/2 h-1/2 rounded-full bg-white/5 border border-white/10 animate-pulse flex items-center justify-center overflow-hidden">
              <div 
@@ -94,6 +104,13 @@ const LiquidPortal: React.FC<LiquidPortalProps> = ({
       </div>
 
       <style>{`
+        @keyframes pulse-slow {
+          0%, 100% { transform: scale(1); opacity: 0.3; }
+          50% { transform: scale(1.05); opacity: 0.6; }
+        }
+        .animate-pulse-slow {
+          animation: pulse-slow 3s infinite ease-in-out;
+        }
         @keyframes float-up {
           0% { transform: translate(-50%, 0) scale(0.5); opacity: 0; }
           20% { opacity: 1; transform: translate(-50%, -20px) scale(1.1); }

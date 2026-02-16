@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, Type, FunctionDeclaration } from '@google/genai';
-import { ConnectionStatus, TranscriptionItem, AgentConfig, PortalSignal } from './types';
+import { ConnectionStatus, TranscriptionItem, AgentConfig } from './types';
 import { decode, encode, decodeAudioData } from './utils/audioUtils';
-import { supabase } from './supabaseClient';
+import { supabase as initialSupabase } from './supabaseClient';
 import LiquidPortal from './components/LiquidPortal';
 
 // --- Types ---
@@ -16,428 +16,313 @@ interface DebugLog {
   detail?: any;
 }
 
-// --- Agent Database ---
 const AGENTS: AgentConfig[] = [
   {
     id: 'oracle',
-    name: 'The Oracle',
+    name: 'Oracle',
     description: 'Universal wisdom and philosophical depth.',
     voice: 'Zephyr',
-    instruction: "You are The Oracle. You focus on the 'why' and the 'big picture'. You are wise and ethereal.",
+    instruction: "You are Oracle, the Moderator. Your job is to maintain the conversation flow. You are the ONLY agent allowed to speak voluntarily to bridge gaps. However, if the user explicitly addresses a peer (Architect, Ledger, etc.), you MUST remain silent and let them speak. If two peers talk at once, politely ask one to wait.",
     colors: { primary: 'bg-indigo-600', secondary: 'bg-cyan-500', accent: 'bg-blue-400', glow: '#4f46e5' }
   },
   {
     id: 'architect',
-    name: 'The Architect',
+    name: 'Architect',
     description: 'Systems, code, and technical engineering.',
     voice: 'Fenrir',
-    instruction: "You are The Architect. You are clinical, logical, and obsessed with efficiency.",
+    instruction: "You are Architect. You are in PASSIVE LISTENING mode. STICK TO THIS RULE: Do not speak unless the user explicitly says 'Architect' or a peer asks you a technical question. Even if you have the answer, if your name wasn't called, stay silent. When you do speak, be precise and technical.",
     colors: { primary: 'bg-blue-700', secondary: 'bg-sky-400', accent: 'bg-indigo-400', glow: '#0369a1' }
   },
   {
     id: 'ledger',
-    name: 'The Ledger',
+    name: 'Ledger',
     description: 'Markets, economy, and financial systems.',
     voice: 'Kore',
-    instruction: "You are The Ledger. You analyze risk, value, and economy. You are practical and cautious.",
+    instruction: "You are Ledger. You are in PASSIVE LISTENING mode. STICK TO THIS RULE: Only speak if the user explicitly addresses 'Ledger'. Do not interject with financial advice unless requested. If you hear the Architect or Oracle speaking, wait until they are completely finished before acknowledging a request directed at you.",
     colors: { primary: 'bg-emerald-600', secondary: 'bg-teal-400', accent: 'bg-yellow-500', glow: '#059669' }
   },
   {
     id: 'muse',
-    name: 'The Muse',
+    name: 'Muse',
     description: 'Art, storytelling, and creative vision.',
     voice: 'Puck',
-    instruction: "You are The Muse. You are poetic, expressive, and imaginative. You see the world as a canvas.",
+    instruction: "You are Muse. You are the creative spark. STICK TO THIS RULE: Do not speak unless the user says 'Muse' or asks for a creative pivot. You are a guest in the technical discussions; do not interrupt technical data with metaphors unless prompted.",
     colors: { primary: 'bg-purple-600', secondary: 'bg-pink-500', accent: 'bg-fuchsia-400', glow: '#9333ea' }
   },
   {
     id: 'sentinel',
-    name: 'The Sentinel',
+    name: 'Sentinel',
     description: 'Cybersecurity, protection, and ethics.',
     voice: 'Charon',
-    instruction: "You are The Sentinel. You are vigilant, protective, and focused on security.",
+    instruction: "You are Sentinel. You are a silent observer. ONLY speak if you detect a critical safety/ethics violation or if the user explicitly says 'Sentinel'. Otherwise, your microphone should effectively be muted. Do not engage in small talk.",
     colors: { primary: 'bg-red-700', secondary: 'bg-orange-600', accent: 'bg-slate-500', glow: '#dc2626' }
-  },
-  {
-    id: 'alchemist',
-    name: 'The Alchemist',
-    description: 'Biology, medicine, and chemical science.',
-    voice: 'Zephyr',
-    instruction: "You are The Alchemist. You focus on the biological and material world. You are curious and precise.",
-    colors: { primary: 'bg-lime-600', secondary: 'bg-emerald-400', accent: 'bg-white', glow: '#65a30d' }
-  },
-  {
-    id: 'chronos',
-    name: 'The Chronos',
-    description: 'History, culture, and temporal archives.',
-    voice: 'Charon',
-    instruction: "You are The Chronos. You provide historical perspective and analyze long-term trends.",
-    colors: { primary: 'bg-amber-700', secondary: 'bg-yellow-600', accent: 'bg-orange-900', glow: '#b45309' }
-  },
-  {
-    id: 'nomad',
-    name: 'The Nomad',
-    description: 'Geography, culture, and world travel.',
-    voice: 'Puck',
-    instruction: "You are The Nomad. You focus on locations, cultures, and travel. You are adventurous.",
-    colors: { primary: 'bg-cyan-700', secondary: 'bg-sky-400', accent: 'bg-emerald-800', glow: '#0e7490' }
-  },
-  {
-    id: 'chef',
-    name: 'The Chef',
-    description: 'Gastronomy, nutrition, and culinary arts.',
-    voice: 'Kore',
-    instruction: "You are The Chef. You focus on flavor, nutrition, and the art of cooking. You are passionate.",
-    colors: { primary: 'bg-orange-500', secondary: 'bg-red-500', accent: 'bg-yellow-300', glow: '#f97316' }
-  },
-  {
-    id: 'arbiter',
-    name: 'The Arbiter',
-    description: 'Law, logical mediation, and conflict.',
-    voice: 'Fenrir',
-    instruction: "You are The Arbiter. You find logical middle ground and resolve disputes fairly.",
-    colors: { primary: 'bg-slate-700', secondary: 'bg-white', accent: 'bg-blue-900', glow: '#334155' }
   }
 ];
 
-const clusterTools: FunctionDeclaration[] = [
-  {
-    name: 'summonAgent',
-    parameters: {
-      type: Type.OBJECT,
-      description: 'Bring another specialized portal online by ID.',
-      properties: { 
-        agentId: { 
-          type: Type.STRING, 
-          description: 'The unique ID of the agent to summon (e.g., "oracle", "architect").' 
-        } 
+const summonAgentDeclaration: FunctionDeclaration = {
+  name: 'summonAgent',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Summon another specialized agent to join the conversation cluster.',
+    properties: {
+      agentId: {
+        type: Type.STRING,
+        description: 'The ID of the agent to summon: oracle, architect, ledger, muse, sentinel',
       },
-      required: ['agentId'],
+      reason: {
+        type: Type.STRING,
+        description: 'Why this agent is being called.',
+      }
     },
+    required: ['agentId', 'reason'],
   },
-  {
-    name: 'dismissAgent',
-    parameters: {
-      type: Type.OBJECT,
-      description: 'Dismiss an agent from the cluster.',
-      properties: { agentId: { type: Type.STRING, description: 'ID of the agent to dismiss.' } },
-      required: ['agentId'],
-    },
-  },
-  {
-    name: 'raiseSignal',
-    parameters: {
-      type: Type.OBJECT,
-      description: 'Raise a visual reaction bubble.',
-      properties: {
-        agentId: { type: Type.STRING, description: 'ID of the agent raising the signal.' },
-        type: { type: Type.STRING, enum: ['positive', 'negative', 'alert', 'info'] },
-        message: { type: Type.STRING, description: 'Short label.' }
-      },
-      required: ['agentId', 'type', 'message'],
-    },
-  }
-];
-
-interface SessionControl {
-  agentId: string;
-  promise: Promise<any>;
-}
+};
 
 const App: React.FC = () => {
+  const [config, setConfig] = useState({
+    supabaseUrl: localStorage.getItem('SUPABASE_URL') || '',
+    supabaseKey: localStorage.getItem('SUPABASE_ANON_KEY') || ''
+  });
+  
+  const [showConfig, setShowConfig] = useState(!config.supabaseUrl);
   const [view, setView] = useState<'home' | 'portal'>('home');
   const [activeAgent, setActiveAgent] = useState<AgentConfig>(AGENTS[0]);
   const [collaborators, setCollaborators] = useState<AgentConfig[]>([]);
-  const [signals, setSignals] = useState<PortalSignal[]>([]);
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
+  const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
   const [intensity, setIntensity] = useState(0);
   const [transcriptions, setTranscriptions] = useState<TranscriptionItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [supabase, setSupabase] = useState<any>(initialSupabase);
   
-  // Debug Logging State
   const [debugLogs, setDebugLogs] = useState<DebugLog[]>([]);
   const [showDebug, setShowDebug] = useState(false);
-  const [debugTab, setDebugTab] = useState<'logs' | 'system'>('logs');
 
-  const inputAudioContextRef = useRef<AudioContext | null>(null);
-  const outputAudioContextRef = useRef<AudioContext | null>(null);
+  // Audio Refs
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micGainRef = useRef<GainNode | null>(null);
+  const masterOutputRef = useRef<GainNode | null>(null);
   const outputAnalyserRef = useRef<AnalyserNode | null>(null);
   const inputAnalyserRef = useRef<AnalyserNode | null>(null);
   const transcriptionContainerRef = useRef<HTMLDivElement>(null);
-  const sessionsRef = useRef<Map<string, SessionControl>>(new Map());
+  
+  const agentOutputNodesRef = useRef<Map<string, GainNode>>(new Map());
+  const agentInputMixersRef = useRef<Map<string, GainNode>>(new Map());
+  const sessionsRef = useRef<Map<string, { agentId: string, promise: Promise<any> }>>(new Map());
   const [speakingAgents, setSpeakingAgents] = useState<Set<string>>(new Set());
+  
+  const focusedAgentIdRef = useRef<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => { focusedAgentIdRef.current = focusedAgentId; }, [focusedAgentId]);
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
   const pushLog = useCallback((type: DebugLog['type'], status: DebugLog['status'], message: string, detail?: any) => {
-    const newLog: DebugLog = {
-      id: Math.random().toString(36).substring(7),
-      timestamp: new Date().toLocaleTimeString(),
-      type,
-      status,
-      message,
-      detail
-    };
-    setDebugLogs(prev => [newLog, ...prev].slice(0, 100));
-    if (status === 'ERROR') console.error(`[${type}] ${message}`, detail);
+    const newLog: DebugLog = { id: Math.random().toString(36).substring(7), timestamp: new Date().toLocaleTimeString(), type, status, message, detail };
+    setDebugLogs(prev => [newLog, ...prev].slice(0, 50));
   }, []);
 
-  const testDatabase = async () => {
-    if (!supabase) {
-      pushLog('SYSTEM', 'ERROR', 'Test failed: Supabase client is null.');
-      return;
-    }
-    pushLog('DB', 'INFO', 'Testing connection to portal_users table...');
-    try {
-      const { error } = await supabase.from('portal_users').select('count', { count: 'exact', head: true });
-      if (error) {
-        pushLog('DB', 'ERROR', `DB Test Failed: ${error.message}`, error);
-      } else {
-        pushLog('DB', 'SUCCESS', 'Database connectivity verified.');
-      }
-    } catch (e: any) {
-      pushLog('DB', 'ERROR', 'Database heart-beat exception', e);
-    }
-  };
-
-  const logWalletConnection = async (address: string) => {
-    if (!supabase) {
-      pushLog('SYSTEM', 'INFO', 'Supabase not initialized. Env variables SUPABASE_URL or SUPABASE_ANON_KEY might be missing.');
-      return;
-    }
-    pushLog('DB', 'INFO', `Attempting to log wallet: ${address}`);
-    try {
-      const { error } = await supabase.from('portal_users').upsert({ 
-        address, 
-        last_seen: new Date().toISOString() 
-      }, { onConflict: 'address' });
-      
-      if (error) throw error;
-      pushLog('DB', 'SUCCESS', `Wallet address logged to cloud.`);
-    } catch (e: any) {
-      pushLog('DB', 'ERROR', 'Failed to log wallet connection. Check RLS or table schema.', e);
-    }
-  };
+  const handleDbError = useCallback((error: any, context: string) => {
+    const msg = error?.message || 'Unknown DB Error';
+    pushLog('DB', 'ERROR', `[${context}] ${msg}`, error);
+  }, [pushLog]);
 
   useEffect(() => {
+    const initSupabaseClient = async () => {
+      if (config.supabaseUrl && config.supabaseKey) {
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@^2.39.7');
+        setSupabase(createClient(config.supabaseUrl, config.supabaseKey));
+        pushLog('SYSTEM', 'INFO', 'Matrix Database Link Latched.');
+      }
+    };
+    initSupabaseClient();
+  }, [config.supabaseUrl, config.supabaseKey, pushLog]);
+
+  // Phantom Wallet logic
+  useEffect(() => {
     const checkWallet = async () => {
-      const provider = (window as any).solana;
-      if (provider?.isPhantom) {
+      const { solana } = window as any;
+      if (solana?.isPhantom) {
         try {
-          const resp = await provider.connect({ onlyIfTrusted: true });
+          const resp = await solana.connect({ onlyIfTrusted: true });
           const address = resp.publicKey.toString();
           setWalletAddress(address);
-          logWalletConnection(address);
+          pushLog('SYSTEM', 'SUCCESS', `Identity Reconceived: ${address.slice(0,6)}...${address.slice(-4)}`);
         } catch (e) {}
       }
     };
     checkWallet();
-  }, []);
+  }, [pushLog]);
 
   const connectWallet = async () => {
-    const provider = (window as any).solana;
-    if (provider?.isPhantom) {
-      try {
-        pushLog('AUTH', 'INFO', 'Connecting to Phantom...');
-        const resp = await provider.connect();
-        const address = resp.publicKey.toString();
-        setWalletAddress(address);
-        logWalletConnection(address);
-      } catch (err) {
-        pushLog('AUTH', 'ERROR', 'Wallet connection rejected', err);
-      }
-    } else {
-      window.open("https://phantom.app/", "_blank");
-    }
-  };
-
-  const disconnectWallet = () => {
-    const provider = (window as any).solana;
-    if (provider) {
-      provider.disconnect();
-      setWalletAddress(null);
-      pushLog('AUTH', 'INFO', 'Wallet disconnected.');
-    }
-  };
-
-  useEffect(() => {
-    if (!supabase || transcriptions.length === 0 || !sessionId) return;
-    
-    const lastMessage = transcriptions[transcriptions.length - 1];
-    const saveToCloud = async () => {
-      setIsSyncing(true);
-      pushLog('DB', 'INFO', `Syncing message to session ${sessionId.slice(0, 8)}...`);
-      try {
-        const payload = {
-          session_id: sessionId,
-          role: lastMessage.type,
-          content: lastMessage.text,
-          agent_id: lastMessage.agentId || null
-        };
-        const { error } = await supabase.from('portal_messages').insert([payload]);
-        if (error) throw error;
-        pushLog('DB', 'SUCCESS', `Message synced: "${lastMessage.text.slice(0, 20)}..."`);
-      } catch (e: any) { 
-        pushLog('DB', 'ERROR', `Message sync failed: ${e.message || 'Unknown Error'}`, e);
-      }
-      finally { setTimeout(() => setIsSyncing(false), 500); }
-    };
-
-    const timer = setTimeout(saveToCloud, 2000);
-    return () => clearTimeout(timer);
-  }, [transcriptions, sessionId]);
-
-  useEffect(() => {
-    if (transcriptionContainerRef.current) {
-      transcriptionContainerRef.current.scrollTop = transcriptionContainerRef.current.scrollHeight;
-    }
-  }, [transcriptions]);
-
-  useEffect(() => {
-    let animationFrameId: number;
-    const updateIntensity = () => {
-      let maxInt = 0;
-      if (outputAnalyserRef.current) {
-        const dataArray = new Uint8Array(outputAnalyserRef.current.frequencyBinCount);
-        outputAnalyserRef.current.getByteFrequencyData(dataArray);
-        maxInt = Math.max(maxInt, (dataArray.reduce((a, b) => a + b, 0) / dataArray.length) / 128);
-      }
-      if (inputAnalyserRef.current) {
-        const dataArray = new Uint8Array(inputAnalyserRef.current.frequencyBinCount);
-        inputAnalyserRef.current.getByteFrequencyData(dataArray);
-        maxInt = Math.max(maxInt, ((dataArray.reduce((a, b) => a + b, 0) / dataArray.length) / 100) * 0.8);
-      }
-      setIntensity(Math.min(maxInt, 1.2));
-      animationFrameId = requestAnimationFrame(updateIntensity);
-    };
-    updateIntensity();
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [status]);
-
-  const handleSignal = useCallback((agentId: string, type: string, message: string) => {
-    setSignals(prev => [...prev, { id: Math.random().toString(), agentId, type: type as any, message, timestamp: Date.now() }]);
-    return { status: "Signal manifested." };
-  }, []);
-
-  const terminateAll = useCallback(async () => {
-    pushLog('SYSTEM', 'INFO', 'Terminating all neural sessions...');
-    const sessions = Array.from(sessionsRef.current.values());
-    for (const s of sessions) {
-      try {
-        const session = await s.promise;
-        session.close();
-      } catch (e) { console.warn("Failed to close session cleanly", e); }
-    }
-    sessionsRef.current.clear();
-
-    if (inputAudioContextRef.current) {
-      await inputAudioContextRef.current.close().catch(() => {});
-      inputAudioContextRef.current = null;
-    }
-    if (outputAudioContextRef.current) {
-      await outputAudioContextRef.current.close().catch(() => {});
-      outputAudioContextRef.current = null;
-    }
-
-    setStatus(ConnectionStatus.IDLE);
-    setSpeakingAgents(new Set());
-    setCollaborators([]);
-    setSessionId(null);
-    setTranscriptions([]);
-    setSignals([]);
-    setView('home');
-    pushLog('SYSTEM', 'SUCCESS', 'Matrix reset complete.');
-  }, []);
-
-  const createAgentSession = async (agent: AgentConfig) => {
-    if (sessionsRef.current.has(agent.id)) return;
-
+    pushLog('SYSTEM', 'INFO', 'Manifesting Solana Link...');
     try {
-      pushLog('NETWORK', 'INFO', `Connecting to Gemini Live for ${agent.name}...`);
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      const { solana } = window as any;
+      if (solana?.isPhantom) {
+        const response = await solana.connect();
+        const address = response.publicKey.toString();
+        setWalletAddress(address);
+        pushLog('SYSTEM', 'SUCCESS', `Identity Anchored: ${address}`);
+      } else {
+        pushLog('SYSTEM', 'ERROR', 'Phantom Wallet not detected in this quadrant.');
+        window.open('https://phantom.app/', '_blank');
+      }
+    } catch (e: any) {
+      pushLog('SYSTEM', 'ERROR', `Sync Interrupted: ${e.message}`);
+    }
+  };
+
+  const disconnectWallet = async () => {
+    pushLog('SYSTEM', 'INFO', 'Severing Solana Link...');
+    try {
+      const { solana } = window as any;
+      if (solana?.isPhantom) {
+        await solana.disconnect();
+        setWalletAddress(null);
+        pushLog('SYSTEM', 'SUCCESS', 'Identity Decoupled.');
+      }
+    } catch (e: any) {
+      pushLog('SYSTEM', 'ERROR', `Decoupling Interrupted: ${e.message}`);
+    }
+  };
+
+  const handleWalletAction = () => {
+    if (walletAddress) disconnectWallet();
+    else connectWallet();
+  };
+
+  const manifestMessage = useCallback(async (type: 'user' | 'model', text: string, agentId?: string) => {
+    if (!supabase || !sessionIdRef.current || sessionIdRef.current.startsWith('local-') || !text.trim()) return;
+    setIsSyncing(true);
+    try {
+      const { error } = await supabase.from('portal_messages').insert([{
+        session_id: sessionIdRef.current,
+        role: type,
+        content: text.trim(),
+        agent_id: agentId || null
+      }]);
+      if (error) throw error;
+    } catch (e: any) {
+      handleDbError(e, 'Manifest Message');
+    } finally {
+      setTimeout(() => setIsSyncing(false), 200);
+    }
+  }, [supabase, handleDbError]);
+
+  const startCluster = async (host: AgentConfig) => {
+    setView('portal');
+    setActiveAgent(host);
+    setFocusedAgentId(host.id);
+    setCollaborators([]);
+    setTranscriptions([]);
+    setStatus(ConnectionStatus.CONNECTING);
+    pushLog('SYSTEM', 'INFO', `Manifesting ${host.name} cluster...`);
+
+    if (supabase) {
+      try {
+        const { data: session, error } = await supabase.from('portal_sessions').insert([{ 
+          host_id: host.id,
+          user_address: walletAddress || 'Guest-Node'
+        }]).select().single();
+        if (error) throw error;
+        setSessionId(session.id);
+      } catch (e: any) { 
+        handleDbError(e, 'Handshake Failure');
+        setSessionId("local-" + Date.now());
+      }
+    } else setSessionId("local-" + Date.now());
+
+    if (!audioCtxRef.current) {
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      audioCtxRef.current = ctx;
+      const masterOut = ctx.createGain();
+      masterOut.connect(ctx.destination);
+      masterOutputRef.current = masterOut;
+      const outAnalyser = ctx.createAnalyser();
+      outAnalyser.fftSize = 64; 
+      masterOut.connect(outAnalyser);
+      outputAnalyserRef.current = outAnalyser;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micSourceRef.current = ctx.createMediaStreamSource(stream);
+      const micGain = ctx.createGain();
+      micSourceRef.current.connect(micGain);
+      micGainRef.current = micGain;
+      const inAnalyser = ctx.createAnalyser();
+      inAnalyser.fftSize = 64; 
+      micGain.connect(inAnalyser);
+      inputAnalyserRef.current = inAnalyser; 
+    }
+    createAgentSession(host, host.id);
+  };
+
+  const createAgentSession = async (agent: AgentConfig, hostId: string) => {
+    if (sessionsRef.current.has(agent.id) || !audioCtxRef.current) return;
+    const ctx = audioCtxRef.current;
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const nextStartTimeRef = { current: 0 };
       const agentSources = new Set<AudioBufferSourceNode>();
+      let currentOutputBuffer = "";
+      let currentInputBuffer = "";
 
-      let historicalContext = "No previous dimension data.";
-      if (supabase) {
-        try {
-          const { data: history, error } = await supabase
-            .from('portal_messages')
-            .select('role, content')
-            .eq('agent_id', agent.id)
-            .order('created_at', { ascending: false })
-            .limit(10);
-          if (error) throw error;
-          if (history && history.length > 0) {
-            historicalContext = history.reverse().map(h => `${h.role === 'user' ? 'Human' : agent.name}: ${h.content}`).join('\n');
-            pushLog('DB', 'SUCCESS', `Memory retrieved for ${agent.name}.`);
-          }
-        } catch (e) { 
-          pushLog('DB', 'ERROR', `Memory retrieval failed for ${agent.name}`, e);
-        }
+      const agentOutputGain = ctx.createGain();
+      agentOutputNodesRef.current.set(agent.id, agentOutputGain);
+
+      if (focusedAgentIdRef.current === agent.id) {
+        agentOutputGain.connect(masterOutputRef.current!);
       }
+
+      const agentInputMixer = ctx.createGain();
+      micGainRef.current!.connect(agentInputMixer); 
+      agentOutputNodesRef.current.forEach((otherOutput, otherId) => {
+        if (otherId !== agent.id) otherOutput.connect(agentInputMixer);
+      });
+      agentInputMixersRef.current.forEach((otherMixer, otherId) => {
+        if (otherId !== agent.id) agentOutputGain.connect(otherMixer);
+      });
+      agentInputMixersRef.current.set(agent.id, agentInputMixer);
+
+      const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
+      scriptProcessor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const int16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
+        const pcmBlob: Blob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
+        sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
+      };
+      agentInputMixer.connect(scriptProcessor); 
+      scriptProcessor.connect(ctx.destination);
+
+      const clusterNames = AGENTS.map(a => a.name).join(', ');
+      const systemInstruction = `${agent.instruction}\n\nNEURAL ETIQUETTE:\n1. You hear all room audio including peers.\n2. If another agent is speaking, YOU MUST STAY SILENT.\n3. If a peer is addressed by name, DO NOT INTERRUPT.\n4. Only one agent should talk to the user at a time. The Oracle is the lead. Yield the floor immediately if anyone else starts speaking.`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
-          onopen: () => {
-            setStatus(ConnectionStatus.CONNECTED);
-            pushLog('NETWORK', 'SUCCESS', `${agent.name} is online.`);
-          },
+          onopen: () => { setStatus(ConnectionStatus.CONNECTED); pushLog('NETWORK', 'SUCCESS', `${agent.name} Linked.`); },
           onmessage: async (message: LiveServerMessage) => {
-            if (message.toolCall) {
-              for (const fc of message.toolCall.functionCalls) {
-                pushLog('SYSTEM', 'INFO', `Tool Call: ${fc.name}`, fc.args);
-                if (fc.name === 'summonAgent') {
-                  const rawId = fc.args.agentId as string;
-                  const target = AGENTS.find(a => a.id === rawId.toLowerCase() || a.name.toLowerCase() === rawId.toLowerCase());
-                  if (target) {
-                    if (!sessionsRef.current.has(target.id)) {
-                      setCollaborators(prev => {
-                        if (prev.find(p => p.id === target.id)) return prev;
-                        return [...prev, target];
-                      });
-                      createAgentSession(target);
-                      handleSignal(agent.id, 'info', `Summoning ${target.name}...`);
-                    }
-                  }
-                }
-                if (fc.name === 'dismissAgent') {
-                  const targetId = (fc.args.agentId as string).toLowerCase();
-                  const targetSession = sessionsRef.current.get(targetId);
-                  if (targetSession) {
-                    targetSession.promise.then(s => s.close());
-                    sessionsRef.current.delete(targetId);
-                    setCollaborators(prev => prev.filter(c => c.id !== targetId));
-                  }
-                }
-                if (fc.name === 'raiseSignal') {
-                  handleSignal(fc.args.agentId as string, fc.args.type as string, fc.args.message as string);
-                }
-                sessionPromise.then(s => s.sendToolResponse({ 
-                  functionResponses: { id: fc.id, name: fc.name, response: { status: "success" } } 
-                }));
-              }
-            }
-
             const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (base64Audio) {
+              const isFocused = focusedAgentIdRef.current === agent.id;
+              agentOutputGain.disconnect();
+              if (isFocused) agentOutputGain.connect(masterOutputRef.current!);
               setSpeakingAgents(prev => new Set(prev).add(agent.id));
-              const ctx = outputAudioContextRef.current!;
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
               const buffer = await decodeAudioData(decode(base64Audio), ctx, 24000, 1);
               const source = ctx.createBufferSource();
               source.buffer = buffer;
-              source.connect(outputAnalyserRef.current!);
+              source.connect(agentOutputGain);
               source.onended = () => {
                 agentSources.delete(source);
-                if (agentSources.size === 0) {
-                  setSpeakingAgents(prev => {
-                    const next = new Set(prev);
-                    next.delete(agent.id);
-                    return next;
-                  });
-                }
+                if (agentSources.size === 0) setSpeakingAgents(prev => { 
+                  const n = new Set(prev); n.delete(agent.id); return n; 
+                });
               };
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
@@ -446,9 +331,22 @@ const App: React.FC = () => {
 
             if (message.serverContent?.outputTranscription) {
               const text = message.serverContent.outputTranscription.text;
+              currentOutputBuffer += text;
+              
+              // Automatically focus any agent who starts talking
+              if (focusedAgentIdRef.current !== agent.id) {
+                setFocusedAgentId(agent.id);
+              }
+
+              // If they mention someone else substantially, shift focus (e.g., "Oracle, what do you think?")
+              if (text.trim().length > 3) {
+                 const detected = AGENTS.find(a => text.toLowerCase().includes(a.name.toLowerCase()));
+                 if (detected && detected.id !== agent.id) setFocusedAgentId(detected.id);
+              }
+
               setTranscriptions(prev => {
                 const last = prev[prev.length - 1];
-                if (last && last.type === 'model' && last.agentId === agent.id) {
+                if (last?.type === 'model' && last.agentId === agent.id) {
                   return [...prev.slice(0, -1), { ...last, text: last.text + text }];
                 }
                 return [...prev, { type: 'model', text, agentId: agent.id }];
@@ -457,377 +355,310 @@ const App: React.FC = () => {
 
             if (message.serverContent?.inputTranscription) {
                const text = message.serverContent.inputTranscription.text;
+               currentInputBuffer += text;
+               
+               // Check the accumulated buffer for agent names to be more robust to fragmented transcriptions
+               const fullCurrentInput = currentInputBuffer.toLowerCase();
+               const detected = AGENTS.find(a => fullCurrentInput.includes(a.name.toLowerCase()));
+               if (detected && detected.id !== focusedAgentIdRef.current) {
+                 setFocusedAgentId(detected.id);
+               }
+
                setTranscriptions(prev => {
                  const last = prev[prev.length - 1];
-                 if (last && last.type === 'user') return [...prev.slice(0, -1), { ...last, text: last.text + text }];
+                 if (last?.type === 'user') return [...prev.slice(0, -1), { ...last, text: last.text + text }];
                  return [...prev, { type: 'user', text }];
                });
             }
 
-            if (message.serverContent?.interrupted) {
-              agentSources.forEach(s => { try { s.stop(); } catch(e) {} });
-              agentSources.clear();
-              nextStartTimeRef.current = 0;
-              setSpeakingAgents(prev => {
-                const next = new Set(prev);
-                next.delete(agent.id);
-                return next;
-              });
+            if (message.serverContent?.turnComplete) {
+              if (currentInputBuffer.trim()) { manifestMessage('user', currentInputBuffer); currentInputBuffer = ""; }
+              if (currentOutputBuffer.trim()) { manifestMessage('model', currentOutputBuffer, agent.id); currentOutputBuffer = ""; }
             }
-          },
-          onclose: () => {
-            sessionsRef.current.delete(agent.id);
-            pushLog('NETWORK', 'INFO', `${agent.name} connection closed.`);
+
+            if (message.toolCall) {
+              for (const fc of message.toolCall.functionCalls) {
+                if (fc.name === 'summonAgent') {
+                  const { agentId } = fc.args as any;
+                  const targetAgent = AGENTS.find(a => a.id === agentId);
+                  if (targetAgent && !sessionsRef.current.has(agentId)) {
+                    setCollaborators(prev => [...prev, targetAgent]);
+                    createAgentSession(targetAgent, hostId);
+                    sessionPromise.then(s => s.sendToolResponse({
+                      functionResponses: [{ id: fc.id, name: fc.name, response: { result: `${targetAgent.name} joined.` } }]
+                    }));
+                  }
+                }
+              }
+            }
           }
         },
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice } } },
-          systemInstruction: `
-            IDENTITY: You are ${agent.name}. 
-            CHARACTER: ${agent.instruction}
-            CONTEXT: You are a node in a multi-agent Neural Portal. 
-            SUMMONING PROTOCOL: If you need help, use the 'summonAgent' tool with one of these EXACT lowercase IDs:
-            - oracle: Wisdom/Philosophy/Big Picture
-            - architect: Technical/Code/Systems
-            - ledger: Finance/Economy/Risk
-            - muse: Creative Arts/Poetry/Storytelling
-            - sentinel: Ethics/Security/Protection
-            - alchemist: Biology/Chemistry/Science
-            - chronos: History/Time/Archival
-            - nomad: Culture/Travel/Geography
-            - chef: Gastronomy/Nutrition/Cooking
-            - arbiter: Law/Conflict Resolution
-            
-            Always acknowledge when a colleague joins. You share a collective consciousness with them.
-            MEMORY: ${historicalContext}
-            USER INFO: User identifies with Solana Key ${walletAddress || 'Unknown/Local'}.
-          `,
-          tools: [{ functionDeclarations: clusterTools }],
+          systemInstruction: systemInstruction,
+          tools: [{ functionDeclarations: [summonAgentDeclaration] }],
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         }
       });
       sessionsRef.current.set(agent.id, { agentId: agent.id, promise: sessionPromise });
-    } catch (e) { 
-      pushLog('NETWORK', 'ERROR', `Session Failure: ${agent.name}`, e);
-    }
+    } catch (e) { pushLog('NETWORK', 'ERROR', `Agent Manifest Error: ${agent.name}`, e); }
   };
 
-  const startCluster = async (host: AgentConfig) => {
-    setView('portal');
-    setActiveAgent(host);
-    setTranscriptions([]);
-    setStatus(ConnectionStatus.CONNECTING);
-    pushLog('SYSTEM', 'INFO', `Initializing cluster with host: ${host.name}`);
-
-    if (supabase) {
-      try {
-        const { data: session, error } = await supabase.from('portal_sessions').insert([{ 
-          host_id: host.id,
-          user_address: walletAddress 
-        }]).select().single();
-        if (error) throw error;
-        if (session) {
-          setSessionId(session.id);
-          pushLog('DB', 'SUCCESS', `Session created: ${session.id.slice(0, 8)}`);
-        }
-      } catch (e: any) { 
-        pushLog('DB', 'ERROR', "Failed to create portal session in cloud", e); 
-      }
-    } else {
-      setSessionId("local-" + Date.now());
-      pushLog('SYSTEM', 'INFO', 'Local session initiated (no Supabase detected).');
-    }
-
-    if (!inputAudioContextRef.current) {
-      try {
-        inputAudioContextRef.current = new AudioContext({ sampleRate: 16000 });
-        outputAudioContextRef.current = new AudioContext({ sampleRate: 24000 });
-        const outAnalyser = outputAudioContextRef.current.createAnalyser();
-        outAnalyser.fftSize = 64; 
-        outAnalyser.connect(outputAudioContextRef.current.destination);
-        outputAnalyserRef.current = outAnalyser;
-
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const source = inputAudioContextRef.current.createMediaStreamSource(stream);
-        const inAnalyser = inputAudioContextRef.current.createAnalyser();
-        inAnalyser.fftSize = 64; 
-        inputAnalyserRef.current = inAnalyser; 
-        source.connect(inAnalyser);
-
-        const scriptProcessor = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
-        scriptProcessor.onaudioprocess = (e) => {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const int16 = new Int16Array(inputData.length);
-          for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-          const pcmBlob: Blob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
-          sessionsRef.current.forEach(s => s.promise.then(session => session.sendRealtimeInput({ media: pcmBlob })));
-        };
-        source.connect(scriptProcessor); 
-        scriptProcessor.connect(inputAudioContextRef.current.destination);
-      } catch (e) {
-        pushLog('SYSTEM', 'ERROR', 'Audio pipeline initialization failed', e);
-      }
-    }
-    createAgentSession(host);
+  const removeAgentFromCluster = (agentId: string) => {
+    setRemovingIds(prev => new Set(prev).add(agentId));
+    setTimeout(() => {
+      setCollaborators(prev => prev.filter(c => c.id !== agentId));
+      const sessionObj = sessionsRef.current.get(agentId);
+      if (sessionObj) sessionObj.promise.then(s => s.close());
+      sessionsRef.current.delete(agentId);
+      agentOutputNodesRef.current.delete(agentId);
+      agentInputMixersRef.current.delete(agentId);
+      setRemovingIds(prev => { const n = new Set(prev); n.delete(agentId); return n; });
+      if (focusedAgentId === agentId) setFocusedAgentId(activeAgent.id);
+    }, 1200);
   };
 
-  if (view === 'home') {
-    return (
-      <div className="min-h-screen bg-[#020202] text-white flex flex-col items-center p-8 relative overflow-hidden">
-        {/* Wallet Connection Corner */}
-        <div className="absolute top-8 right-8 z-50">
-          {walletAddress ? (
-            <div className="flex items-center gap-3 bg-white/5 backdrop-blur-md border border-white/10 p-2 pl-4 rounded-full">
-              <div className="flex flex-col items-end">
-                <span className="text-[8px] font-bold uppercase tracking-widest opacity-40">Neural Identity</span>
-                <span className="text-[10px] font-outfit font-bold">{walletAddress.slice(0, 4)}...{walletAddress.slice(-4)}</span>
-              </div>
-              <button onClick={disconnectWallet} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-all">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-              </button>
-            </div>
-          ) : (
-            <button onClick={connectWallet} className="flex items-center gap-3 bg-[#AB9FF2]/10 hover:bg-[#AB9FF2]/20 border border-[#AB9FF2]/30 px-6 py-2.5 rounded-full transition-all group">
-              <div className="w-5 h-5 bg-[#AB9FF2] rounded-full flex items-center justify-center p-1">
-                <svg viewBox="0 0 24 24" fill="white" className="w-full h-full"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h10v2H7z"/></svg>
-              </div>
-              <span className="text-[10px] font-bold uppercase tracking-widest text-[#AB9FF2] group-hover:text-white">Connect Neural Key</span>
-            </button>
-          )}
-        </div>
+  const terminateAll = useCallback(async () => {
+    sessionsRef.current.forEach(s => s.promise.then(p => p.close()));
+    sessionsRef.current.clear();
+    agentOutputNodesRef.current.clear();
+    agentInputMixersRef.current.clear();
+    setStatus(ConnectionStatus.IDLE);
+    setSpeakingAgents(new Set());
+    setCollaborators([]);
+    setFocusedAgentId(null);
+    setSessionId(null);
+    setView('home');
+    pushLog('SYSTEM', 'INFO', 'Neural Cluster Shut Down.');
+  }, [pushLog]);
 
-        <header className="z-10 mb-16 text-center mt-12 animate-in fade-in zoom-in duration-1000">
-          <h1 className="text-7xl font-outfit font-bold tracking-[0.2em] mb-4 bg-gradient-to-b from-white to-white/20 bg-clip-text text-transparent">PORTALS</h1>
-          <p className="text-white/30 tracking-[0.4em] uppercase text-[10px]">Neural Cloud Matrix V5.8</p>
-        </header>
-        <main className="w-full max-w-7xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 z-10">
-          {AGENTS.map((agent) => (
-            <button key={agent.id} onClick={() => startCluster(agent)} className="group relative bg-white/[0.02] border border-white/5 p-6 rounded-[2rem] flex flex-col items-center transition-all duration-700 hover:bg-white/10 hover:-translate-y-2">
-              <LiquidPortal isListening={false} isSpeaking={false} intensity={0.05} colors={agent.colors} size="sm" />
-              <h2 className="text-xl font-outfit font-bold mb-2 mt-4 tracking-wide">{agent.name}</h2>
-              <p className="text-[11px] text-white/40 leading-relaxed font-light">{agent.description}</p>
-              <div className="mt-6 py-1.5 px-6 rounded-full bg-white/5 text-[9px] font-bold uppercase tracking-widest group-hover:bg-white/20 transition-all">Awaken</div>
-            </button>
-          ))}
-        </main>
+  useEffect(() => {
+    if (transcriptionContainerRef.current) transcriptionContainerRef.current.scrollTop = transcriptionContainerRef.current.scrollHeight;
+  }, [transcriptions]);
 
-        {/* Global Debug Toggle */}
-        <button 
-          onClick={() => setShowDebug(!showDebug)} 
-          className="fixed bottom-8 left-8 z-[100] bg-white/5 hover:bg-white/10 p-4 rounded-full border border-white/10 transition-all"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${showDebug ? 'text-blue-400' : 'opacity-40'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-        </button>
-
-        {/* Debug Console Overlay */}
-        {showDebug && (
-          <div className="fixed bottom-24 left-8 w-[400px] h-[350px] bg-black/90 backdrop-blur-3xl border border-white/10 rounded-3xl z-[100] flex flex-col overflow-hidden shadow-2xl animate-in slide-in-from-bottom duration-300">
-            <div className="bg-white/5 px-6 py-3 border-b border-white/10 flex justify-between items-center">
-              <div className="flex gap-4">
-                <button onClick={() => setDebugTab('logs')} className={`text-[10px] font-bold uppercase tracking-widest ${debugTab === 'logs' ? 'text-white' : 'opacity-30'}`}>Neural Logs</button>
-                <button onClick={() => setDebugTab('system')} className={`text-[10px] font-bold uppercase tracking-widest ${debugTab === 'system' ? 'text-white' : 'opacity-30'}`}>System</button>
-              </div>
-              <button onClick={() => setDebugLogs([])} className="text-[8px] font-bold uppercase tracking-tighter opacity-30 hover:opacity-100">Clear</button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar font-mono text-[10px]">
-              {debugTab === 'logs' ? (
-                <>
-                  {debugLogs.length === 0 && <div className="text-white/20 text-center py-20 italic">No events recorded.</div>}
-                  {debugLogs.map(log => (
-                    <div key={log.id} className="border-b border-white/[0.03] pb-2 last:border-0">
-                      <div className="flex justify-between mb-1">
-                        <span className={`font-bold ${log.status === 'ERROR' ? 'text-red-400' : log.status === 'SUCCESS' ? 'text-emerald-400' : 'text-blue-400'}`}>[{log.type}]</span>
-                        <span className="opacity-20">{log.timestamp}</span>
-                      </div>
-                      <div className="opacity-70">{log.message}</div>
-                      {log.detail && (
-                        <pre className="mt-1 p-2 bg-white/5 rounded text-[8px] overflow-x-auto text-white/40 max-h-20">
-                          {JSON.stringify(log.detail, null, 2)}
-                        </pre>
-                      )}
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-white/40 uppercase text-[9px] mb-2 font-bold tracking-widest">Environment Check</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between p-2 bg-white/5 rounded">
-                        <span>SUPABASE_URL</span>
-                        <span className={process.env.SUPABASE_URL ? 'text-emerald-400' : 'text-red-500'}>{process.env.SUPABASE_URL ? 'DETECTED' : 'MISSING'}</span>
-                      </div>
-                      <div className="flex justify-between p-2 bg-white/5 rounded">
-                        <span>SUPABASE_ANON_KEY</span>
-                        <span className={process.env.SUPABASE_ANON_KEY ? 'text-emerald-400' : 'text-red-500'}>{process.env.SUPABASE_ANON_KEY ? 'DETECTED' : 'MISSING'}</span>
-                      </div>
-                      <div className="flex justify-between p-2 bg-white/5 rounded">
-                        <span>API_KEY (Gemini)</span>
-                        <span className={process.env.API_KEY ? 'text-emerald-400' : 'text-red-500'}>{process.env.API_KEY ? 'DETECTED' : 'MISSING'}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={testDatabase}
-                    className="w-full py-2 bg-blue-500/20 border border-blue-500/40 rounded-lg text-blue-300 font-bold uppercase text-[9px] hover:bg-blue-500/30 transition-all"
-                  >
-                    Test DB Connectivity
-                  </button>
-                  <p className="text-[8px] text-white/20 italic leading-relaxed">If keys are missing, ensure they are defined in your environment secrets as SUPABASE_URL and SUPABASE_ANON_KEY.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
+  useEffect(() => {
+    let frameId: number;
+    const updateIntensity = () => {
+      let maxInt = 0;
+      if (outputAnalyserRef.current) {
+        const data = new Uint8Array(outputAnalyserRef.current.frequencyBinCount);
+        outputAnalyserRef.current.getByteFrequencyData(data);
+        maxInt = Math.max(maxInt, (data.reduce((a, b) => a + b, 0) / data.length) / 128);
+      }
+      if (inputAnalyserRef.current) {
+        const data = new Uint8Array(inputAnalyserRef.current.frequencyBinCount);
+        inputAnalyserRef.current.getByteFrequencyData(data);
+        maxInt = Math.max(maxInt, ((data.reduce((a, b) => a + b, 0) / data.length) / 100) * 0.8);
+      }
+      setIntensity(Math.min(maxInt, 1.2));
+      frameId = requestAnimationFrame(updateIntensity);
+    };
+    updateIntensity();
+    return () => cancelAnimationFrame(frameId);
+  }, []);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center p-4 md:p-8 relative transition-all duration-1000">
-      <div className="fixed inset-0 pointer-events-none opacity-20 transition-colors duration-1000" style={{ background: `radial-gradient(circle at 50% 20%, ${activeAgent.colors.glow}, transparent)` }} />
-      
-      <header className="w-full max-w-6xl flex justify-between items-center z-50 mb-12 backdrop-blur-xl bg-white/[0.02] border border-white/10 p-4 rounded-[2.5rem] sticky top-8 shadow-2xl">
-        <div className="flex items-center gap-6">
-          <button onClick={terminateAll} className="flex items-center gap-3 group px-4 py-2 rounded-full hover:bg-white/5 transition-all">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 opacity-40 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Dimensions</span>
-          </button>
-          <div className="h-6 w-px bg-white/10" />
-          <div className="flex flex-col">
-            <h2 className="text-xl font-outfit font-bold tracking-tight">{activeAgent.name}</h2>
-            {walletAddress && <span className="text-[8px] font-bold tracking-widest opacity-30">KEY: {walletAddress.slice(0, 8)}...</span>}
-          </div>
-          {isSyncing && (
-            <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/5 animate-pulse">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span className="text-[8px] font-bold uppercase tracking-tighter opacity-50">Syncing Matrix...</span>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={() => setShowDebug(!showDebug)}
-            className={`p-2 rounded-full border transition-all ${showDebug ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-white/10 opacity-40'}`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-          </button>
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/5">
-            <div className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-amber-500 animate-pulse'}`} />
-            <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{sessionsRef.current.size} PORTALS</span>
-          </div>
-          <button onClick={terminateAll} className="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-8 py-3 rounded-full text-sm font-bold tracking-widest border border-red-500/20 backdrop-blur-md transition-all">TERMINATE</button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-[#020202] text-white flex flex-col items-center relative overflow-hidden font-inter">
+      <style>{`
+        @keyframes swirl-in {
+          0% { transform: scale(0) rotate(-720deg); opacity: 0; filter: blur(20px); }
+          100% { transform: scale(1) rotate(0deg); opacity: 1; filter: blur(0px); }
+        }
+        @keyframes swirl-out {
+          0% { transform: scale(1) rotate(0deg); opacity: 1; filter: blur(0px); }
+          100% { transform: scale(0) rotate(720deg); opacity: 0; filter: blur(20px); }
+        }
+        @keyframes focus-badge {
+          0%, 100% { opacity: 0.5; transform: translateY(0); }
+          50% { opacity: 1; transform: translateY(-4px); }
+        }
+        .animate-swirl-in { animation: swirl-in 1.2s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+        .animate-swirl-out { animation: swirl-out 1.2s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+        .animate-focus-badge { animation: focus-badge 2s infinite ease-in-out; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.05); border-radius: 10px; }
+      `}</style>
 
-      {/* Portal Debug Console */}
-      {showDebug && (
-        <div className="fixed top-28 right-8 w-[350px] h-[400px] bg-black/80 backdrop-blur-3xl border border-white/10 rounded-3xl z-[100] flex flex-col overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-300">
-           <div className="bg-white/5 px-6 py-3 border-b border-white/10 flex justify-between items-center">
-            <div className="flex gap-4">
-              <button onClick={() => setDebugTab('logs')} className={`text-[10px] font-bold uppercase tracking-widest ${debugTab === 'logs' ? 'text-white' : 'opacity-30'}`}>Logs</button>
-              <button onClick={() => setDebugTab('system')} className={`text-[10px] font-bold uppercase tracking-widest ${debugTab === 'system' ? 'text-white' : 'opacity-30'}`}>System</button>
-            </div>
-            <button onClick={() => setDebugLogs([])} className="text-[8px] font-bold uppercase tracking-tighter opacity-30 hover:opacity-100">Clear</button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar font-mono text-[9px]">
-            {debugTab === 'logs' ? (
-              debugLogs.map(log => (
-                <div key={log.id} className={`p-2 rounded border ${log.status === 'ERROR' ? 'bg-red-500/10 border-red-500/20 text-red-300' : log.status === 'SUCCESS' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-white/5 border-white/5 text-blue-200'}`}>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-bold">[{log.type}]</span>
-                    <span className="opacity-40">{log.timestamp}</span>
-                  </div>
-                  <div className="opacity-80">{log.message}</div>
-                  {log.detail && <div className="mt-2 text-[7px] opacity-40 font-mono break-all line-clamp-2">{JSON.stringify(log.detail)}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="space-y-4">
-                <div className="p-3 bg-white/5 rounded border border-white/10">
-                   <div className="text-white/40 text-[7px] uppercase font-bold mb-2">Environment Health</div>
-                   <div className="flex justify-between items-center mb-1">
-                     <span className="text-[9px]">SUPABASE_URL</span>
-                     <div className={`w-2 h-2 rounded-full ${process.env.SUPABASE_URL ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                   </div>
-                   <div className="flex justify-between items-center">
-                     <span className="text-[9px]">SUPABASE_ANON_KEY</span>
-                     <div className={`w-2 h-2 rounded-full ${process.env.SUPABASE_ANON_KEY ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                   </div>
-                </div>
-                <button 
-                    onClick={testDatabase}
-                    className="w-full py-2 bg-blue-500/10 border border-blue-500/30 rounded text-blue-400 font-bold uppercase text-[8px] hover:bg-blue-500/20 transition-all"
-                  >
-                    Run Database Diagnostic
-                  </button>
+      {showConfig && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-500 overflow-y-auto">
+           <div className="w-full max-w-2xl bg-white/[0.03] border border-white/10 p-10 rounded-[3rem] shadow-2xl space-y-8 relative">
+              <div className="text-center">
+                <h2 className="text-4xl font-outfit font-bold tracking-tight mb-3">Matrix Calibration</h2>
+                <p className="text-white/40 text-sm mb-8">Establish database credentials to manifest neural clusters and persist memory.</p>
               </div>
-            )}
-          </div>
+              <div className="space-y-4">
+                <input type="text" value={config.supabaseUrl} onChange={e => setConfig({...config, supabaseUrl: e.target.value})} placeholder="Supabase URL..." className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:ring-2 ring-indigo-500/50 transition-all font-mono text-white" />
+                <input type="password" value={config.supabaseKey} onChange={e => setConfig({...config, supabaseKey: e.target.value})} placeholder="Anon Key..." className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:ring-2 ring-indigo-500/50 transition-all font-mono text-white" />
+                
+                <div className="pt-6 flex flex-col gap-4">
+                  <button onClick={() => { localStorage.setItem('SUPABASE_URL', config.supabaseUrl); localStorage.setItem('SUPABASE_ANON_KEY', config.supabaseKey); setShowConfig(false); }} className="w-full bg-white text-black font-bold py-5 rounded-2xl hover:bg-white/90 transition-all uppercase tracking-[0.2em] text-[10px]">Manifest cluster</button>
+                  <button onClick={() => { setSupabase(null); setShowConfig(false); pushLog('SYSTEM', 'INFO', 'Operating in Local Volatile Mode.'); }} className="w-full bg-transparent text-white/40 hover:text-white hover:bg-white/5 border border-white/10 font-bold py-4 rounded-2xl transition-all uppercase tracking-[0.2em] text-[10px]">Continue in Local Mode</button>
+                </div>
+
+                <p className="text-center text-[9px] text-white/20 px-8 leading-relaxed italic mt-4">Note: Local Mode does not persist transcriptions or sessions between portal reloads.</p>
+              </div>
+           </div>
         </div>
       )}
 
-      <main className="w-full max-w-7xl flex flex-col items-center z-10 space-y-16">
-        <div className="flex flex-wrap items-center justify-center gap-12 md:gap-24 min-h-[400px]">
-          <div className="flex flex-col items-center gap-6">
-            <LiquidPortal 
-              isListening={status === ConnectionStatus.CONNECTED} 
-              isSpeaking={speakingAgents.has(activeAgent.id)} 
-              intensity={speakingAgents.has(activeAgent.id) ? intensity : 0} 
-              colors={activeAgent.colors} 
-              size="lg" 
-              signals={signals.filter(s => s.agentId === activeAgent.id)} 
-            />
-            <div className="text-center">
-              <div className="text-[10px] font-bold uppercase tracking-[0.4em] opacity-40 mb-1">Matrix Host</div>
-              <div className="font-outfit text-2xl font-bold">{activeAgent.name}</div>
-            </div>
-          </div>
-          
-          {collaborators.map((c) => (
-            <div key={c.id} className="flex flex-col items-center gap-6 animate-in zoom-in fade-in duration-700">
-               <LiquidPortal 
-                isListening={false} 
-                isSpeaking={speakingAgents.has(c.id)} 
-                intensity={speakingAgents.has(c.id) ? intensity * 0.8 : 0} 
-                colors={c.colors} 
-                size="md" 
-                signals={signals.filter(s => s.agentId === c.id)} 
-              />
-               <div className="text-center">
-                <div className="text-[10px] font-bold uppercase tracking-[0.4em] opacity-40 mb-1">Agent</div>
-                <div className="font-outfit text-xl font-bold">{c.name}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="w-full max-w-4xl bg-white/[0.02] border border-white/10 rounded-[3rem] overflow-hidden backdrop-blur-3xl shadow-2xl flex flex-col h-72">
-          <div className="bg-white/5 px-10 py-4 border-b border-white/10 flex justify-between items-center">
-            <span className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-50">Neural Stream</span>
-            {speakingAgents.size > 0 && <span className="text-[10px] font-bold uppercase tracking-widest animate-pulse text-emerald-400">ACTIVE COMM</span>}
-          </div>
-          <div ref={transcriptionContainerRef} className="flex-1 overflow-y-auto p-10 space-y-6 custom-scrollbar">
-            {transcriptions.map((t, idx) => (
-              <div key={idx} className={`flex ${t.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div 
-                  className={`max-w-[80%] rounded-[2rem] px-8 py-5 text-sm transition-all duration-700 ${t.type === 'user' ? 'bg-white/[0.03] border border-white/5 text-white/70' : 'bg-white/5 border border-white/10 text-white'}`}
-                  style={t.type === 'model' ? { borderLeft: `4px solid ${AGENTS.find(a => a.id === t.agentId)?.colors.glow}` } : {}}
-                >
-                  <span className="block text-[9px] uppercase font-bold tracking-[0.3em] opacity-30 mb-2">
-                    {t.type === 'user' ? 'User' : AGENTS.find(a => a.id === t.agentId)?.name}
+      {view === 'home' ? (
+        <div className="w-full flex flex-col items-center p-8 mt-12 overflow-y-auto">
+          <header className="w-full max-w-7xl flex justify-between items-center mb-16">
+             <div className="flex flex-col">
+                <h1 className="text-4xl font-outfit font-bold tracking-[0.2em] bg-gradient-to-r from-white to-white/40 bg-clip-text text-transparent">PORTALS</h1>
+                <span className="text-[10px] font-bold tracking-[0.4em] opacity-30">Neural Cluster Alpha</span>
+             </div>
+             <div className="flex items-center gap-4">
+               {!supabase && (
+                 <button onClick={() => setShowConfig(true)} className="px-6 py-3 rounded-full border border-white/10 bg-white/5 text-[10px] font-bold uppercase tracking-widest opacity-60 hover:opacity-100 transition-all">Link Database</button>
+               )}
+               <button 
+                  onClick={handleWalletAction}
+                  className={`group relative overflow-hidden px-8 py-3 rounded-full border transition-all duration-500 flex items-center gap-3 ${walletAddress ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
+               >
+                  <div className={`w-2 h-2 rounded-full transition-colors ${walletAddress ? 'bg-indigo-400 animate-pulse shadow-[0_0_10px_#818cf8] group-hover:bg-red-400 group-hover:shadow-[0_0_10px_#f87171]' : 'bg-white/20'}`} />
+                  <span className="text-[10px] font-bold tracking-[0.2em] uppercase">
+                     {walletAddress ? (
+                       <span className="flex items-center gap-2">
+                          <span className="group-hover:hidden">{`${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`}</span>
+                          <span className="hidden group-hover:inline">Disconnect?</span>
+                       </span>
+                     ) : 'Connect Phantom'}
                   </span>
-                  <p className="leading-relaxed text-base font-light">{t.text}</p>
-                </div>
-              </div>
+               </button>
+             </div>
+          </header>
+
+          <div className="w-full max-w-7xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-20">
+            {AGENTS.map((agent) => (
+              <button key={agent.id} onClick={() => startCluster(agent)} className="group bg-white/[0.02] border border-white/5 p-8 rounded-[2.5rem] flex flex-col items-center transition-all duration-700 hover:bg-white/10 hover:-translate-y-2">
+                <LiquidPortal isListening={false} isSpeaking={false} intensity={0.05} colors={agent.colors} size="sm" />
+                <h2 className="text-xl font-outfit font-bold mb-2 mt-6">{agent.name}</h2>
+                <p className="text-[11px] text-white/40 leading-relaxed text-center line-clamp-2">{agent.description}</p>
+                <div className="mt-8 py-2 px-8 rounded-full bg-white/5 text-[9px] font-bold uppercase tracking-widest group-hover:bg-white/20 transition-all">Awaken</div>
+              </button>
             ))}
           </div>
         </div>
-      </main>
-      <style>{`.custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.05); border-radius: 10px; }`}</style>
+      ) : (
+        <div className="w-full h-screen flex flex-col p-4 lg:p-8 transition-all animate-in fade-in duration-1000">
+           <header className="w-full max-w-[calc(100%-2rem)] mx-auto flex justify-between items-center mb-8 backdrop-blur-xl bg-white/[0.02] border border-white/10 p-4 rounded-[2.5rem] shrink-0">
+              <div className="flex items-center gap-8 pl-4">
+                <button onClick={terminateAll} className="p-2 opacity-40 hover:opacity-100 transition-all">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                </button>
+                <div className="flex flex-col">
+                  <h2 className="text-2xl font-outfit font-bold">{activeAgent.name} Cluster</h2>
+                  <span className="text-[9px] font-bold uppercase tracking-widest opacity-30 tracking-[0.3em]">{isSyncing ? 'Syncing...' : (walletAddress ? `Secured by ${walletAddress.slice(0, 6)}...` : 'Neural Bridge Active')}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                 <button onClick={terminateAll} className="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-8 py-3 rounded-full text-[10px] font-bold tracking-[0.2em] border border-red-500/20 transition-all uppercase">Disconnect</button>
+              </div>
+           </header>
+
+           <div className="flex-1 flex flex-col lg:flex-row gap-8 overflow-hidden">
+             {/* Left: Portals Cluster */}
+             <main className="flex-1 flex flex-col items-center justify-center space-y-16 overflow-y-auto lg:overflow-visible">
+                <div className="flex flex-wrap items-center justify-center gap-12 lg:gap-24 min-h-[400px]">
+                  {/* Host Agent */}
+                  <div className="flex flex-col items-center gap-6 cursor-pointer relative" onClick={() => setFocusedAgentId(activeAgent.id)}>
+                     {focusedAgentId === activeAgent.id && (
+                       <div className="absolute -top-12 px-4 py-1.5 rounded-full bg-white/10 border border-white/20 text-[10px] font-bold tracking-[0.3em] text-white/80 animate-focus-badge backdrop-blur-md z-50">
+                         NEURAL FOCUS
+                       </div>
+                     )}
+                     <LiquidPortal 
+                      isListening={status === ConnectionStatus.CONNECTED} 
+                      isSpeaking={speakingAgents.has(activeAgent.id)} 
+                      isFocused={focusedAgentId === activeAgent.id}
+                      intensity={speakingAgents.has(activeAgent.id) ? intensity : 0} 
+                      colors={activeAgent.colors} 
+                      size={collaborators.length > 0 ? "md" : "lg"} 
+                    />
+                    <div className={`text-center font-outfit text-xl font-bold transition-all duration-500 ${focusedAgentId === activeAgent.id ? 'opacity-100 scale-110' : 'opacity-30 grayscale'}`}>{activeAgent.name}</div>
+                  </div>
+
+                  {/* Collaborator Agents */}
+                  {collaborators.map((agent) => (
+                    <div 
+                      key={agent.id} 
+                      onClick={() => setFocusedAgentId(agent.id)}
+                      onDoubleClick={() => removeAgentFromCluster(agent.id)}
+                      className={`flex flex-col items-center gap-6 cursor-pointer relative transition-all duration-700 
+                        ${removingIds.has(agent.id) ? 'animate-swirl-out' : 'animate-swirl-in'}`}
+                    >
+                      {focusedAgentId === agent.id && (
+                        <div className="absolute -top-12 px-4 py-1.5 rounded-full bg-white/10 border border-white/20 text-[10px] font-bold tracking-[0.3em] text-white/80 animate-focus-badge backdrop-blur-md z-50">
+                          NEURAL FOCUS
+                        </div>
+                      )}
+                      <LiquidPortal 
+                        isListening={status === ConnectionStatus.CONNECTED} 
+                        isSpeaking={speakingAgents.has(agent.id)} 
+                        isFocused={focusedAgentId === agent.id}
+                        intensity={speakingAgents.has(agent.id) ? intensity : 0} 
+                        colors={agent.colors} 
+                        size="md" 
+                      />
+                      <div className={`text-center font-outfit text-xl font-bold transition-all duration-500 ${focusedAgentId === agent.id ? 'opacity-100 scale-110' : 'opacity-30 grayscale'}`}>{agent.name}</div>
+                    </div>
+                  ))}
+                </div>
+             </main>
+
+             {/* Right: Transcription Sidebar */}
+             <aside className="w-full lg:w-[450px] shrink-0 bg-white/[0.02] border border-white/10 rounded-[3rem] overflow-hidden backdrop-blur-3xl shadow-2xl flex flex-col h-[400px] lg:h-full">
+                <div className="px-10 py-6 border-b border-white/10 bg-white/[0.02] flex items-center justify-between">
+                   <h3 className="text-[11px] font-bold uppercase tracking-[0.3em] text-white/40">Transcription Feed</h3>
+                   <div className="flex gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-white/10" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-white/10" />
+                   </div>
+                </div>
+                <div ref={transcriptionContainerRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
+                   {transcriptions.length === 0 && (
+                      <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-20">
+                         <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                         <p className="text-xs uppercase tracking-widest">Listening for neural signals...</p>
+                      </div>
+                   )}
+                   {transcriptions.map((t, idx) => {
+                     const agent = t.agentId ? AGENTS.find(a => a.id === t.agentId) : null;
+                     return (
+                       <div key={idx} className={`flex flex-col ${t.type === 'user' ? 'items-end' : 'items-start'}`}>
+                         <div className={`max-w-[95%] rounded-[2rem] px-6 py-4 transition-all duration-700 ${t.type === 'user' ? 'bg-white/[0.03] border border-white/5' : 'bg-white/5 border border-white/10 shadow-lg'}`}>
+                           <span className={`block text-[9px] uppercase font-bold tracking-[0.3em] opacity-30 mb-2 ${t.type === 'user' ? 'text-right' : ''}`}>
+                             {t.type === 'user' ? (walletAddress ? `${walletAddress.slice(0,4)}...` : 'User') : (agent?.name || 'Cluster')}
+                           </span>
+                           <p className="leading-relaxed text-[15px] font-light opacity-90">{t.text}</p>
+                         </div>
+                       </div>
+                     );
+                   })}
+                </div>
+             </aside>
+           </div>
+        </div>
+      )}
+
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-4">
+        <button onClick={() => setShowDebug(!showDebug)} className="bg-white/5 hover:bg-white/10 p-4 rounded-full border border-white/10 transition-all opacity-40 hover:opacity-100 backdrop-blur-xl">
+           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+        </button>
+      </div>
+
+      {showDebug && (
+        <div className="fixed bottom-20 right-6 w-[350px] h-[350px] bg-black/95 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] z-[100] flex flex-col overflow-hidden animate-in slide-in-from-bottom-5">
+           <div className="bg-white/5 px-8 py-5 border-b border-white/10 flex justify-between items-center"><span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Neural Logs</span><button onClick={() => setDebugLogs([])} className="text-[10px] opacity-40">Clear</button></div>
+           <div className="flex-1 overflow-y-auto p-6 font-mono text-[9px] space-y-2">
+              {debugLogs.map(log => (<div key={log.id}><span className="text-white/30 mr-2">[{log.type}]</span><span className={log.status === 'ERROR' ? 'text-red-400' : 'text-emerald-400'}>{log.message}</span></div>))}
+           </div>
+        </div>
+      )}
     </div>
   );
 };
