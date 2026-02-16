@@ -805,11 +805,13 @@ Format in markdown with headers (##) and bullet points.`;
       research: AGENTS.map(agent => ({
         agentId: agent.id,
         findings: '',
+        timestamp: Date.now(),
         status: 'researching' as const
       })),
       discussions: [],
-      summary: '',
-      status: 'researching'
+      summary: null,
+      status: 'researching',
+      startTime: Date.now()
     };
     
     console.log('[v0] Session initialized with', AGENTS.length, 'agents');
