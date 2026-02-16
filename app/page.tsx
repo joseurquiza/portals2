@@ -564,49 +564,17 @@ const App: React.FC = () => {
     pushLog('SYSTEM', 'INFO', 'Board session ended.');
   }, [pushLog]);
 
-  const startRoundtable = async (topic: string) => {
-    if (!topic.trim()) return;
-    
-    setView('roundtable');
-    setShowRoundtableInput(false);
-    pushLog('SYSTEM', 'INFO', `Starting Roundtable: ${topic}`);
-    
-    const newSession: RoundtableSession = {
-      topic,
-      research: AGENTS.map(agent => ({
-        agentId: agent.id,
-        findings: '',
-        timestamp: Date.now(),
-        status: 'researching'
-      })),
-      discussions: [],
-      summary: null,
-      status: 'researching',
-      startTime: Date.now()
-    };
-    
-    setRoundtableSession(newSession);
-    setStatus(ConnectionStatus.CONNECTING);
-    
-    // Initialize audio context if needed
-    if (!audioCtxRef.current) {
-      const ctx = new AudioContext({ sampleRate: 16000 });
-      audioCtxRef.current = ctx;
-      const masterOut = ctx.createGain();
-      masterOut.connect(ctx.destination);
-      masterOutputRef.current = masterOut;
-    }
-    
-    // Conduct research phase
-    await conductResearch(topic);
-  };
-
   const conductResearch = async (topic: string) => {
+    console.log('[v0] RESEARCH PHASE STARTED');
+    console.log('[v0] Topic:', topic);
     pushLog('SYSTEM', 'INFO', 'All agents researching topic...');
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
     // Research agents sequentially to show live progress
-    for (const agent of AGENTS) {
+    for (let i = 0; i < AGENTS.length; i++) {
+      const agent = AGENTS[i];
+      console.log(`[v0] [${i + 1}/${AGENTS.length}] ${agent.name} starting research...`);
+      
       try {
         // Mark as actively researching
         setFocusedAgentId(agent.id);
@@ -618,11 +586,13 @@ Research this topic from your unique perspective: "${topic}"
 
 Provide your key findings in 2-3 sentences. Focus on insights relevant to your specialty.`;
 
+        console.log(`[v0] ${agent.name} - Sending research prompt to Gemini...`);
         const result = await ai.models.generateContent({
           model: 'gemini-2.0-flash-exp',
           contents: prompt
         });
         const findings = result.text || 'No findings available';
+        console.log(`[v0] ${agent.name} - Research complete:`, findings.substring(0, 100) + '...');
         
         setRoundtableSession(prev => {
           if (!prev) return null;
@@ -637,7 +607,9 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
         });
         
         pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
+        console.log(`[v0] ${agent.name} research saved`);
       } catch (e: any) {
+        console.error(`[v0] ${agent.name} research failed:`, e);
         pushLog('SYSTEM', 'ERROR', `${agent.name} research failed: ${e.message}`);
         setRoundtableSession(prev => {
           if (!prev) return null;
@@ -653,15 +625,18 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
       }
     }
     
+    console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
     setFocusedAgentId(null);
     
     // Move to discussion phase
+    console.log('[v0] Waiting 2 seconds before starting discussion...');
     setTimeout(() => startDiscussion(), 2000);
   };
 
   const startDiscussion = async () => {
     if (!roundtableSession) return;
     
+    console.log('[v0] DISCUSSION PHASE STARTED');
     setRoundtableSession(prev => prev ? { ...prev, status: 'discussing' } : null);
     pushLog('SYSTEM', 'INFO', 'Agents entering discussion phase...');
     setStatus(ConnectionStatus.CONNECTED);
@@ -670,9 +645,14 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     
     // Simulate discussion rounds
     const discussionRounds = 3; // Each agent speaks once per round
+    console.log(`[v0] Discussion will have ${discussionRounds} rounds with ${AGENTS.length} agents`);
     
     for (let round = 0; round < discussionRounds; round++) {
-      for (const agent of AGENTS) {
+      console.log(`[v0] ROUND ${round + 1}/${discussionRounds} STARTING`);
+      
+      for (let i = 0; i < AGENTS.length; i++) {
+        const agent = AGENTS[i];
+        console.log(`[v0] [Round ${round + 1}, Speaker ${i + 1}/${AGENTS.length}] Waiting 2s for ${agent.name} to speak...`);
         await new Promise(resolve => setTimeout(resolve, 2000)); // Pause between speakers
         
         try {
@@ -685,6 +665,9 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
             .slice(-5)
             .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
             .join('\n');
+          
+          console.log(`[v0] ${agent.name} - Preparing discussion prompt...`);
+          console.log(`[v0] ${agent.name} - Context: ${recentDiscussions ? 'Has recent discussion' : 'Starting fresh'}`);
           
           const prompt = `You are ${agent.name} in a roundtable discussion about: "${roundtableSession.topic}"
 
@@ -704,11 +687,13 @@ This is discussion round ${round + 1} of ${discussionRounds}. ${
 
 Respond in 1-2 sentences. Be conversational and reference others' points.`;
 
+          console.log(`[v0] ${agent.name} - Sending discussion prompt to Gemini...`);
           const result = await ai.models.generateContent({
             model: 'gemini-2.0-flash-exp',
             contents: prompt
           });
           const message = result.text || 'No response available';
+          console.log(`[v0] ${agent.name} said: "${message}"`);
           
           const newDiscussion: RoundtableDiscussion = {
             fromAgentId: agent.id,
@@ -727,25 +712,32 @@ Respond in 1-2 sentences. Be conversational and reference others' points.`;
           
           setFocusedAgentId(agent.id);
           pushLog('SYSTEM', 'INFO', `${agent.name} speaking...`);
+          console.log(`[v0] ${agent.name} message added to discussion`);
           
         } catch (e: any) {
+          console.error(`[v0] ${agent.name} discussion error:`, e);
           pushLog('SYSTEM', 'ERROR', `${agent.name} discussion error: ${e.message}`);
         }
       }
+      console.log(`[v0] ROUND ${round + 1} COMPLETE`);
     }
     
+    console.log('[v0] DISCUSSION PHASE COMPLETE');
     // Move to summary phase
+    console.log('[v0] Waiting 1 second before generating summary...');
     setTimeout(() => generateSummary(), 1000);
   };
 
   const generateSummary = async () => {
     if (!roundtableSession) return;
     
+    console.log('[v0] SUMMARY PHASE STARTED');
     setRoundtableSession(prev => prev ? { ...prev, status: 'summarizing' } : null);
     pushLog('SYSTEM', 'INFO', 'Oracle generating summary...');
     setFocusedAgentId('oracle');
     
     try {
+      console.log('[v0] Oracle - Compiling all research and discussions...');
       const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
       
       const allResearch = roundtableSession.research
@@ -772,23 +764,63 @@ Provide a comprehensive summary that:
 
 Format in markdown with headers (##) and bullet points.`;
 
+      console.log('[v0] Oracle - Sending summary prompt to Gemini...');
       const result = await ai.models.generateContent({
         model: 'gemini-2.0-flash-exp',
         contents: prompt
       });
       const summary = result.text || 'Summary not available';
+      console.log('[v0] Oracle - Summary generated:', summary.substring(0, 150) + '...');
       
       setRoundtableSession(prev => {
         if (!prev) return null;
         return { ...prev, summary, status: 'complete' };
       });
       
+      console.log('[v0] SUMMARY PHASE COMPLETE');
+      console.log('[v0] ROUNDTABLE SESSION COMPLETE');
       pushLog('SYSTEM', 'SUCCESS', 'Roundtable complete!');
       setStatus(ConnectionStatus.IDLE);
       
     } catch (e: any) {
+      console.error('[v0] Summary generation failed:', e);
       pushLog('SYSTEM', 'ERROR', `Summary generation failed: ${e.message}`);
     }
+  };
+
+  const startRoundtable = async (topic: string) => {
+    if (!topic.trim()) return;
+    
+    console.log('[v0] ROUNDTABLE SESSION INITIATED');
+    console.log('[v0] Topic:', topic);
+    console.log('[v0] Participants:', AGENTS.map(a => a.name).join(', '));
+    
+    setShowRoundtableInput(false);
+    pushLog('SYSTEM', 'INFO', `Starting roundtable on: ${topic}`);
+    setStatus(ConnectionStatus.CONNECTING);
+    
+    // Initialize roundtable session
+    const session: RoundtableSession = {
+      topic,
+      research: AGENTS.map(agent => ({
+        agentId: agent.id,
+        findings: '',
+        timestamp: Date.now(),
+        status: 'researching' as const
+      })),
+      discussions: [],
+      summary: null,
+      status: 'researching',
+      startTime: Date.now()
+    };
+    
+    console.log('[v0] Session initialized with', AGENTS.length, 'agents');
+    setRoundtableSession(session);
+    setView('roundtable');
+    
+    console.log('[v0] Starting research phase...');
+    // Conduct research phase
+    await conductResearch(topic);
   };
 
   useEffect(() => {
@@ -813,8 +845,8 @@ Format in markdown with headers (##) and bullet points.`;
   }, [status]);
 
   return (
-  <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
-  {/* Wallet & Debug Header */}
+    <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
+      {/* Wallet & Debug Header */}
       <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-6 z-40">
         <button 
           onClick={handleWalletAction}
