@@ -588,7 +588,7 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
 
         console.log(`[v0] ${agent.name} - Sending research prompt to Gemini...`);
         const result = await ai.models.generateContent({
-          model: 'gemini-3.0-flash-preview',
+          model: 'gemini-3-flash-preview',
           contents: prompt
         });
         const findings = result.text || 'No findings available';
@@ -689,7 +689,7 @@ Respond in 1-2 sentences. Be conversational and reference others' points.`;
 
           console.log(`[v0] ${agent.name} - Sending discussion prompt to Gemini...`);
           const result = await ai.models.generateContent({
-            model: 'gemini-3.0-flash-preview',
+            model: 'gemini-3-flash-preview',
             contents: prompt
           });
           const message = result.text || 'No response available';
@@ -766,7 +766,7 @@ Format in markdown with headers (##) and bullet points.`;
 
       console.log('[v0] Oracle - Sending summary prompt to Gemini...');
       const result = await ai.models.generateContent({
-        model: 'gemini-3.0-flash-preview',
+        model: 'gemini-3-flash-preview',
         contents: prompt
       });
       const summary = result.text || 'Summary not available';
