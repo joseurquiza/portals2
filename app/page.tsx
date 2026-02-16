@@ -560,9 +560,11 @@ Research this topic from your unique perspective: "${topic}"
 
 Provide your key findings in 2-3 sentences. Focus on insights relevant to your specialty.`;
 
-        const model = ai.generativeModel({ model: 'gemini-2.0-flash' });
-        const result = await model.generateContent(prompt);
-        const findings = result.response.text();
+        const result = await ai.models.generateContent({
+          model: 'gemini-2.0-flash-exp',
+          contents: prompt
+        });
+        const findings = result.text || 'No findings available';
         
         setRoundtableSession(prev => {
           if (!prev) return null;
@@ -635,9 +637,11 @@ This is discussion round ${round + 1} of ${discussionRounds}. ${
 
 Respond in 1-2 sentences. Be conversational and reference others' points.`;
 
-          const model = ai.generativeModel({ model: 'gemini-2.0-flash' });
-          const result = await model.generateContent(prompt);
-          const message = result.response.text();
+          const result = await ai.models.generateContent({
+            model: 'gemini-2.0-flash-exp',
+            contents: prompt
+          });
+          const message = result.text || 'No response available';
           
           const newDiscussion: RoundtableDiscussion = {
             fromAgentId: agent.id,
@@ -701,9 +705,11 @@ Provide a comprehensive summary that:
 
 Format in markdown with headers (##) and bullet points.`;
 
-      const model = ai.generativeModel({ model: 'gemini-2.0-flash' });
-      const result = await model.generateContent(prompt);
-      const summary = result.response.text();
+      const result = await ai.models.generateContent({
+        model: 'gemini-2.0-flash-exp',
+        contents: prompt
+      });
+      const summary = result.text || 'Summary not available';
       
       setRoundtableSession(prev => {
         if (!prev) return null;
