@@ -437,11 +437,13 @@ const App: React.FC = () => {
                  setFocusedAgentId(detected.id);
                }
 
-               setTranscriptions(prev => {
-                 const last = prev[prev.length - 1];
-                 if (last?.type === 'user') return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-                 return [...prev, { type: 'user', text }];
-               });
+               if (text) {
+                 setTranscriptions(prev => {
+                   const last = prev[prev.length - 1];
+                   if (last?.type === 'user') return [...prev.slice(0, -1), { ...last, text: last.text + text }];
+                   return [...prev, { type: 'user', text }];
+                 });
+               }
             }
 
             if (message.serverContent?.turnComplete) {
