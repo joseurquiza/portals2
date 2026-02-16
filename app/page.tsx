@@ -224,7 +224,7 @@ const App: React.FC = () => {
       if (supabaseUrl && supabaseKey) {
         const { createClient } = await import('@supabase/supabase-js');
         setSupabase(createClient(supabaseUrl, supabaseKey));
-        pushLog('SYSTEM', 'INFO', 'Matrix Database Link Latched.');
+        pushLog('SYSTEM', 'INFO', 'Database connection established.');
       }
     };
     initSupabaseClient();
@@ -308,7 +308,7 @@ const App: React.FC = () => {
     setCollaborators([]);
     setTranscriptions([]);
     setStatus(ConnectionStatus.CONNECTING);
-    pushLog('SYSTEM', 'INFO', `Manifesting ${host.name} cluster...`);
+    pushLog('SYSTEM', 'INFO', `Starting board session with ${host.name}...`);
 
     if (supabase) {
       try {
@@ -560,7 +560,7 @@ const App: React.FC = () => {
     setSessionId(null);
     setRoundtableSession(null);
     setView('home');
-    pushLog('SYSTEM', 'INFO', 'Neural Cluster Shut Down.');
+    pushLog('SYSTEM', 'INFO', 'Board session ended.');
   }, [pushLog]);
 
   const startRoundtable = async (topic: string) => {
@@ -837,8 +837,11 @@ Format in markdown with headers (##) and bullet points.`;
       {view === 'home' && (
         <div className="flex flex-col items-center justify-center min-h-screen relative z-10 px-4">
           <h1 className="text-6xl md:text-8xl font-bold mb-4 font-outfit bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
-            PORTALS
+            BoardRoom
           </h1>
+          <p className="text-xl md:text-2xl text-white/60 mb-8 max-w-2xl mx-auto font-light">
+            Your AI Board of Directors for Startups
+          </p>
           <p className="text-white/60 text-lg mb-12 text-center max-w-md">
             Summon specialized AI agents into a live, voice-powered collaboration cluster.
           </p>

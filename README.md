@@ -1,6 +1,6 @@
-# PORTALS - Multi-Agent AI Collaboration Platform
+# BoardRoom - Your AI Board of Directors
 
-A Next.js application enabling live, voice-powered collaboration with specialized AI agents.
+A Next.js application providing startups with an AI board of directors. Five specialized AI agents offer expert guidance through live voice conversations, collaborative discussions, and intelligent knowledge search.
 
 ## What Changed (Vite → Next.js)
 
@@ -61,17 +61,17 @@ To enable session persistence with Supabase:
 
 ## Features
 
-- **Multi-Agent System**: Five specialized AI agents (Oracle, Architect, Ledger, Muse, Sentinel)
-- **Live Voice Chat**: Real-time audio conversations with AI agents
-- **Visual Portals**: Animated liquid portal visualizations for each agent
-- **Collaborative Clusters**: Agents can summon each other into conversations
-- **Customizable Personalities**: Assign thinking styles (Peter Thiel, Elon Musk, Math Professor, etc.) to each agent
-- **Roundtable Discussions**: All agents research a topic, discuss findings, and provide summaries
-- **Company Knowledge Base**: Upload PDFs, documents, spreadsheets, and images that agents can search and reference
-- **Agentic Search**: Agents intelligently search uploaded documents during conversations
-- **Transcription**: Live transcription of all conversations
-- **Phantom Wallet Integration**: Connect your Solana wallet
-- **Session Persistence**: Optional Supabase integration for saving conversations
+- **AI Board of Directors**: Five specialized AI agents acting as your startup advisory board (Oracle, Architect, Ledger, Muse, Sentinel)
+- **Live Voice Conversations**: Real-time audio discussions with your AI advisors
+- **Animated Agent Portals**: Beautiful liquid portal visualizations for each board member
+- **Dynamic Collaboration**: Agents can summon each other into discussions for multi-perspective insights
+- **Customizable Thinking Styles**: Assign personalities (Peter Thiel, Elon Musk, Warren Buffett, etc.) to each agent
+- **Board Roundtables**: All agents research your topic, discuss findings with each other, and deliver comprehensive summaries
+- **Company Knowledge Base**: Upload your documents, financials, and data - agents search and reference them during conversations
+- **Intelligent Document Search**: Agents automatically find relevant information from your uploaded files
+- **Live Transcription**: Keep records of all board discussions
+- **Wallet Integration**: Connect your Phantom wallet for identity
+- **Session History**: Save and review past board meetings with Supabase
 
 ## Tech Stack
 
