@@ -165,6 +165,9 @@ const App: React.FC = () => {
   
   const [roundtableSession, setRoundtableSession] = useState<RoundtableSession | null>(null);
   const [showRoundtableInput, setShowRoundtableInput] = useState(false);
+  const [roundtableDbId, setRoundtableDbId] = useState<string | null>(null);
+  const [isDiscussionRunning, setIsDiscussionRunning] = useState(false);
+  const [shouldStopDiscussion, setShouldStopDiscussion] = useState(false);
   
   const [agentPersonalities, setAgentPersonalities] = useState<AgentPersonality[]>(
     AGENTS.map(agent => ({ agentId: agent.id, presetId: 'default', customTraits: '' }))
@@ -628,18 +631,54 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
     setFocusedAgentId(null);
     
-    // Move to discussion phase
-    console.log('[v0] Waiting 2 seconds before starting discussion...');
-    setTimeout(() => startDiscussion(), 2000);
+    // Save research to database
+    if (roundtableDbId && supabase) {
+      console.log('[v0] Saving research to database...');
+      try {
+        for (const research of roundtableSession.research) {
+          const agent = AGENTS.find(a => a.id === research.agentId);
+          await supabase.from('roundtable_research').insert({
+            session_id: roundtableDbId,
+            agent_id: research.agentId,
+            agent_name: agent?.name || research.agentId,
+            findings: research.findings,
+            status: research.status
+          });
+        }
+        
+        // Update session status
+        await supabase.from('roundtable_sessions').update({
+          status: 'researching'
+        }).eq('id', roundtableDbId);
+        
+        console.log('[v0] Research saved to database');
+        pushLog('SYSTEM', 'SUCCESS', 'Research saved to database');
+      } catch (e: any) {
+        console.error('[v0] Failed to save research:', e);
+        pushLog('SYSTEM', 'ERROR', `Failed to save research: ${e.message}`);
+      }
+    }
+    
+    setRoundtableSession(prev => prev ? { ...prev, status: 'researching' } : null);
+    pushLog('SYSTEM', 'INFO', 'Research complete. Click "Start Discussion" to begin board conversation.');
   };
 
   const startDiscussion = async () => {
-    if (!roundtableSession) return;
+    if (!roundtableSession || isDiscussionRunning) return;
     
     console.log('[v0] DISCUSSION PHASE STARTED - Interactive Agent Mode');
+    setIsDiscussionRunning(true);
+    setShouldStopDiscussion(false);
     setRoundtableSession(prev => prev ? { ...prev, status: 'discussing' } : null);
     pushLog('SYSTEM', 'INFO', 'Board members entering discussion...');
     setStatus(ConnectionStatus.CONNECTED);
+    
+    // Update database status
+    if (roundtableDbId && supabase) {
+      await supabase.from('roundtable_sessions').update({
+        status: 'discussing'
+      }).eq('id', roundtableDbId);
+    }
     
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
@@ -648,6 +687,13 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     console.log(`[v0] Starting ${totalExchanges} conversational exchanges`);
     
     for (let exchange = 0; exchange < totalExchanges; exchange++) {
+      // Check if user requested stop
+      if (shouldStopDiscussion) {
+        console.log('[v0] Discussion stopped by user');
+        pushLog('SYSTEM', 'INFO', 'Discussion stopped');
+        break;
+      }
+      
       console.log(`[v0] EXCHANGE ${exchange + 1}/${totalExchanges}`);
       await new Promise(resolve => setTimeout(resolve, 1500));
       
@@ -743,6 +789,23 @@ Your response:`;
           };
         });
         
+        // Save message to database
+        if (roundtableDbId && supabase) {
+          try {
+            await supabase.from('roundtable_discussions').insert({
+              session_id: roundtableDbId,
+              from_agent_id: nextAgent.id,
+              from_agent_name: nextAgent.name,
+              to_agent_id: addressedAgent?.id || null,
+              to_agent_name: addressedAgent?.name || null,
+              message: message
+            });
+            console.log(`[v0] Message saved to database`);
+          } catch (e: any) {
+            console.error(`[v0] Failed to save message:`, e);
+          }
+        }
+        
         setFocusedAgentId(nextAgent.id);
         pushLog('SYSTEM', 'INFO', `${nextAgent.name}${addressedAgent ? ` → ${addressedAgent.name}` : ''}`);
         console.log(`[v0] Message added${addressedAgent ? ` (addressing ${addressedAgent.name})` : ''}`);
@@ -754,8 +817,22 @@ Your response:`;
     }
     
     console.log('[v0] DISCUSSION PHASE COMPLETE');
-    console.log('[v0] Waiting 1 second before generating summary...');
-    setTimeout(() => generateSummary(), 1000);
+    setIsDiscussionRunning(false);
+    
+    // Update database status
+    if (roundtableDbId && supabase) {
+      const finalStatus = shouldStopDiscussion ? 'stopped' : 'complete';
+      await supabase.from('roundtable_sessions').update({
+        status: finalStatus,
+        end_time: new Date().toISOString()
+      }).eq('id', roundtableDbId);
+      console.log(`[v0] Session marked as ${finalStatus} in database`);
+    }
+    
+    if (!shouldStopDiscussion) {
+      console.log('[v0] Waiting 1 second before generating summary...');
+      setTimeout(() => generateSummary(), 1000);
+    }
   };
 
   const generateSummary = async () => {
@@ -807,6 +884,16 @@ Format in markdown with headers (##) and bullet points.`;
         return { ...prev, summary, status: 'complete' };
       });
       
+      // Save summary to database
+      if (roundtableDbId && supabase) {
+        await supabase.from('roundtable_sessions').update({
+          summary,
+          status: 'complete',
+          end_time: new Date().toISOString()
+        }).eq('id', roundtableDbId);
+        console.log('[v0] Summary saved to database');
+      }
+      
       console.log('[v0] SUMMARY PHASE COMPLETE');
       console.log('[v0] ROUNDTABLE SESSION COMPLETE');
       pushLog('SYSTEM', 'SUCCESS', 'Roundtable complete!');
@@ -828,6 +915,25 @@ Format in markdown with headers (##) and bullet points.`;
     setShowRoundtableInput(false);
     pushLog('SYSTEM', 'INFO', `Starting roundtable on: ${topic}`);
     setStatus(ConnectionStatus.CONNECTING);
+    
+    // Create database session
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('roundtable_sessions').insert({
+          topic,
+          status: 'researching'
+        }).select().single();
+        
+        if (error) throw error;
+        if (data) {
+          setRoundtableDbId(data.id);
+          console.log('[v0] Database session created:', data.id);
+        }
+      } catch (e: any) {
+        console.error('[v0] Failed to create database session:', e);
+        pushLog('SYSTEM', 'ERROR', `Failed to create database session: ${e.message}`);
+      }
+    }
     
     // Initialize roundtable session
     const session: RoundtableSession = {
@@ -1660,6 +1766,20 @@ Format in markdown with headers (##) and bullet points.`;
                   </span>
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Start Discussion Button */}
+                  {roundtableSession.status === 'researching' && 
+                   roundtableSession.research.every(r => r.status === 'complete') && 
+                   !isDiscussionRunning && (
+                    <div className="col-span-full flex justify-center mt-4">
+                      <button
+                        onClick={() => startDiscussion()}
+                        className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold px-8 py-3 rounded-xl transition-all transform hover:scale-105 shadow-lg"
+                      >
+                        Start Board Discussion
+                      </button>
+                    </div>
+                  )}
+                  
                   {roundtableSession.research.map((research) => {
                     const agent = AGENTS.find(a => a.id === research.agentId);
                     const isActivelyResearching = focusedAgentId === agent?.id && research.status === 'researching';
@@ -1727,10 +1847,23 @@ Format in markdown with headers (##) and bullet points.`;
               {/* Discussion Phase */}
               {roundtableSession.discussions.length > 0 && (
                 <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6">
-                  <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    <span className="text-2xl">💬</span>
-                    Discussion
-                  </h2>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-bold flex items-center gap-2">
+                      <span className="text-2xl">💬</span>
+                      Discussion
+                      <span className="text-xs text-white/40 ml-2">
+                        {roundtableSession.discussions.length} exchanges
+                      </span>
+                    </h2>
+                    {isDiscussionRunning && (
+                      <button
+                        onClick={() => setShouldStopDiscussion(true)}
+                        className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 font-semibold px-4 py-2 rounded-lg transition text-sm"
+                      >
+                        Stop Discussion
+                      </button>
+                    )}
+                  </div>
                   <div className="space-y-3">
                     {roundtableSession.discussions.map((discussion, idx) => {
                       const agent = AGENTS.find(a => a.id === discussion.fromAgentId);
