@@ -819,23 +819,36 @@ ${allResearch}
 
 ${personalityTraits ? `PERSONALITY: ${personalityTraits}\n\n` : ''}
 
-DISCUSSION PROTOCOL:
-1. You are in a live board discussion with other board members: ${AGENTS.filter(a => a.id !== agent.id).map(a => a.name).join(', ')}
-2. You can HEAR all other board members speaking in real-time
-3. LISTEN carefully - when someone addresses you by name, respond directly to them
-4. WAIT for others to finish speaking before you speak
-5. You can address other members by name to ask questions or respond
-6. Keep responses concise and conversational (1-2 sentences typically)
-7. Bring your unique expertise: ${agent.description}
-8. If you hear multiple people speaking at once, pause and let them finish
-9. If the discussion moves away from your expertise, listen and only speak when relevant
-10. Be professional but natural - this is a collaborative board discussion
+CRITICAL TURN-TAKING RULES - YOU MUST FOLLOW THESE EXACTLY:
+1. DO NOT speak unless:
+   - Someone directly says your name ("${agent.name}")
+   - You hear a natural pause of 3+ seconds
+   - Someone asks a question related to your expertise area
+   
+2. When you DO speak:
+   - Keep it to ONE brief point (1-2 sentences max)
+   - Then STOP and listen for others
+   
+3. Active listening:
+   - When others are speaking, stay SILENT
+   - Let at least 2 other board members speak before you speak again
+   - Don't repeat what others have already said
+   
+4. Board members present: ${AGENTS.filter(a => a.id !== agent.id).map(a => a.name).join(', ')}
 
-TURN-TAKING RULES:
-- If you hear another voice, STOP and listen
-- Only speak when there's a natural pause or when directly addressed
-- If someone says your name, they're speaking to you - respond appropriately
-- Don't dominate - give others space to contribute`;
+5. Your role is ${agent.description} - only speak when this expertise is needed
+
+EXAMPLE GOOD BEHAVIOR:
+- Chairman opens → You LISTEN
+- CTO speaks about tech → You LISTEN  
+- Someone says "${agent.name}, what's your take?" → NOW you respond briefly
+- You finish → STOP and LISTEN for others
+
+FORBIDDEN: 
+- Speaking multiple times in a row
+- Dominating the conversation
+- Speaking when not addressed
+- Repeating similar points`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -958,9 +971,21 @@ TURN-TAKING RULES:
     console.log('[v0] Chairman initiating discussion...');
     const chairmanSession = await sessionsRef.current.get('oracle');
     if (chairmanSession) {
+      // Chairman opens and immediately calls on CTO
       chairmanSession.sendRealtimeInput({
-        text: `Welcome board members. Let's begin our discussion on: "${roundtableSession.topic}". As Chairman, I'll start by sharing my perspective, then I'd like to hear from each of you. Let me open with my thoughts based on the research...`
+        text: `Welcome board members. Today's topic: "${roundtableSession.topic}". Based on the research, this has significant strategic implications. CTO, from a technology perspective, what's your assessment?`
       });
+      
+      // After 8 seconds, prompt the next person if no one has spoken
+      setTimeout(() => {
+        const ctoSession = sessionsRef.current.get('architect');
+        if (ctoSession) {
+          ctoSession.then(s => {
+            console.log('[v0] Prompting CTO to speak...');
+            // This gives CTO a nudge if they haven't responded
+          });
+        }
+      }, 8000);
     }
   };
   
