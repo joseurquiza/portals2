@@ -1158,12 +1158,22 @@ Format in markdown with headers (##) and bullet points.`;
                   const files = Array.from(e.target.files || []);
                   if (files.length === 0) return;
                   
+                  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || localStorage.getItem('SUPABASE_URL');
+                  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || localStorage.getItem('SUPABASE_ANON_KEY');
+                  
+                  if (!supabaseUrl || !supabaseKey) {
+                    pushLog('SYSTEM', 'ERROR', 'Database not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in environment or localStorage.');
+                    return;
+                  }
+                  
                   setUploadingFiles(true);
                   pushLog('SYSTEM', 'INFO', `Uploading ${files.length} file(s)...`);
                   
                   for (const file of files) {
                     const formData = new FormData();
                     formData.append('file', file);
+                    formData.append('supabaseUrl', supabaseUrl);
+                    formData.append('supabaseKey', supabaseKey);
                     
                     try {
                       const res = await fetch('/api/knowledge/upload', {
@@ -1174,13 +1184,26 @@ Format in markdown with headers (##) and bullet points.`;
                       if (res.ok) {
                         const data = await res.json();
                         pushLog('SYSTEM', 'SUCCESS', `Uploaded: ${file.name}`);
-                        setKnowledgeDocs(prev => [data.document, ...prev]);
+                        // Refresh the document list
+                        if (data.results && data.results.length > 0) {
+                          const { createClient } = await import('@supabase/supabase-js');
+                          const supabase = createClient(supabaseUrl, supabaseKey);
+                          const { data: docs } = await supabase
+                            .from('knowledge_documents')
+                            .select('*')
+                            .order('upload_date', { ascending: false })
+                            .limit(1);
+                          if (docs && docs[0]) {
+                            setKnowledgeDocs(prev => [docs[0], ...prev]);
+                          }
+                        }
                       } else {
-                        pushLog('SYSTEM', 'ERROR', `Failed to upload: ${file.name}`);
+                        const error = await res.json();
+                        pushLog('SYSTEM', 'ERROR', `Failed: ${file.name} - ${error.error || 'Unknown error'}`);
                       }
-                    } catch (err) {
+                    } catch (err: any) {
                       console.error('[v0] Upload error:', err);
-                      pushLog('SYSTEM', 'ERROR', `Upload error: ${file.name}`);
+                      pushLog('SYSTEM', 'ERROR', `Upload error: ${file.name} - ${err.message}`);
                     }
                   }
                   
