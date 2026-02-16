@@ -567,7 +567,7 @@ const App: React.FC = () => {
   const startRoundtable = async (topic: string) => {
     if (!topic.trim()) return;
     
-    console.log('[v0] 🎯 ROUNDTABLE SESSION INITIATED');
+    console.log('[v0] ROUNDTABLE SESSION INITIATED');
     console.log('[v0] Topic:', topic);
     console.log('[v0] Participants:', AGENTS.map(a => a.name).join(', '));
     
@@ -614,7 +614,7 @@ const App: React.FC = () => {
   };
 
   const conductResearch = async (topic: string) => {
-    console.log('[v0] 🔍 RESEARCH PHASE STARTED');
+    console.log('[v0] RESEARCH PHASE STARTED');
     console.log('[v0] Topic:', topic);
     pushLog('SYSTEM', 'INFO', 'All agents researching topic...');
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
@@ -656,9 +656,9 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
         });
         
         pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
-        console.log(`[v0] ✅ ${agent.name} research saved`);
+        console.log(`[v0] ${agent.name} research saved`);
       } catch (e: any) {
-        console.error(`[v0] ❌ ${agent.name} research failed:`, e);
+        console.error(`[v0] ${agent.name} research failed:`, e);
         pushLog('SYSTEM', 'ERROR', `${agent.name} research failed: ${e.message}`);
         setRoundtableSession(prev => {
           if (!prev) return null;
@@ -674,7 +674,7 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
       }
     }
     
-    console.log('[v0] 🔍 RESEARCH PHASE COMPLETE - All agents finished');
+    console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
     setFocusedAgentId(null);
     
     // Move to discussion phase
@@ -685,7 +685,7 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
   const startDiscussion = async () => {
     if (!roundtableSession) return;
     
-    console.log('[v0] 💬 DISCUSSION PHASE STARTED');
+    console.log('[v0] DISCUSSION PHASE STARTED');
     setRoundtableSession(prev => prev ? { ...prev, status: 'discussing' } : null);
     pushLog('SYSTEM', 'INFO', 'Agents entering discussion phase...');
     setStatus(ConnectionStatus.CONNECTED);
@@ -697,7 +697,7 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     console.log(`[v0] Discussion will have ${discussionRounds} rounds with ${AGENTS.length} agents`);
     
     for (let round = 0; round < discussionRounds; round++) {
-      console.log(`[v0] 📢 ROUND ${round + 1}/${discussionRounds} STARTING`);
+      console.log(`[v0] ROUND ${round + 1}/${discussionRounds} STARTING`);
       
       for (let i = 0; i < AGENTS.length; i++) {
         const agent = AGENTS[i];
@@ -761,17 +761,17 @@ Respond in 1-2 sentences. Be conversational and reference others' points.`;
           
           setFocusedAgentId(agent.id);
           pushLog('SYSTEM', 'INFO', `${agent.name} speaking...`);
-          console.log(`[v0] ✅ ${agent.name} message added to discussion`);
+          console.log(`[v0] ${agent.name} message added to discussion`);
           
         } catch (e: any) {
-          console.error(`[v0] ❌ ${agent.name} discussion error:`, e);
+          console.error(`[v0] ${agent.name} discussion error:`, e);
           pushLog('SYSTEM', 'ERROR', `${agent.name} discussion error: ${e.message}`);
         }
       }
-      console.log(`[v0] 📢 ROUND ${round + 1} COMPLETE`);
+      console.log(`[v0] ROUND ${round + 1} COMPLETE`);
     }
     
-    console.log('[v0] 💬 DISCUSSION PHASE COMPLETE');
+    console.log('[v0] DISCUSSION PHASE COMPLETE');
     // Move to summary phase
     console.log('[v0] Waiting 1 second before generating summary...');
     setTimeout(() => generateSummary(), 1000);
@@ -780,7 +780,7 @@ Respond in 1-2 sentences. Be conversational and reference others' points.`;
   const generateSummary = async () => {
     if (!roundtableSession) return;
     
-    console.log('[v0] 📝 SUMMARY PHASE STARTED');
+    console.log('[v0] SUMMARY PHASE STARTED');
     setRoundtableSession(prev => prev ? { ...prev, status: 'summarizing' } : null);
     pushLog('SYSTEM', 'INFO', 'Oracle generating summary...');
     setFocusedAgentId('oracle');
@@ -826,13 +826,13 @@ Format in markdown with headers (##) and bullet points.`;
         return { ...prev, summary, status: 'complete' };
       });
       
-      console.log('[v0] 📝 SUMMARY PHASE COMPLETE');
-      console.log('[v0] ✅ ROUNDTABLE SESSION COMPLETE');
+      console.log('[v0] SUMMARY PHASE COMPLETE');
+      console.log('[v0] ROUNDTABLE SESSION COMPLETE');
       pushLog('SYSTEM', 'SUCCESS', 'Roundtable complete!');
       setStatus(ConnectionStatus.IDLE);
       
     } catch (e: any) {
-      console.error('[v0] ❌ Summary generation failed:', e);
+      console.error('[v0] Summary generation failed:', e);
       pushLog('SYSTEM', 'ERROR', `Summary generation failed: ${e.message}`);
     }
   };
