@@ -1922,20 +1922,6 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                   </span>
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Start Discussion Button */}
-                  {roundtableSession.status === 'researching' && 
-                   roundtableSession.research.every(r => r.status === 'complete') && 
-                   !isDiscussionRunning && (
-                    <div className="col-span-full flex justify-center mt-4">
-                      <button
-                        onClick={() => startDiscussion()}
-                        className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold px-8 py-3 rounded-xl transition-all transform hover:scale-105 shadow-lg"
-                      >
-                        Start Board Discussion
-                      </button>
-                    </div>
-                  )}
-                  
                   {roundtableSession.research.map((research) => {
                     const agent = AGENTS.find(a => a.id === research.agentId);
                     const isActivelyResearching = focusedAgentId === agent?.id && research.status === 'researching';
@@ -1998,6 +1984,20 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                     );
                   })}
                 </div>
+                
+                {/* Start Discussion Button - appears after all research is complete */}
+                {roundtableSession.status === 'researching' && 
+                 roundtableSession.research.every(r => r.status === 'complete') && 
+                 !isDiscussionRunning && (
+                  <div className="flex justify-center mt-6">
+                    <button
+                      onClick={() => startDiscussion()}
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold px-8 py-3 rounded-xl transition-all transform hover:scale-105 shadow-lg shadow-purple-500/50 animate-pulse"
+                    >
+                      🎤 Start Board Discussion
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Discussion Phase */}
