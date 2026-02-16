@@ -162,6 +162,7 @@ const App: React.FC = () => {
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   
   const [roundtableSession, setRoundtableSession] = useState<RoundtableSession | null>(null);
   const [showRoundtableInput, setShowRoundtableInput] = useState(false);
@@ -253,21 +254,56 @@ const App: React.FC = () => {
   }, [pushLog]);
 
   const connectWallet = async () => {
-    pushLog('SYSTEM', 'INFO', 'Manifesting Solana Link...');
     try {
-      const { solana } = window as any;
-      if (solana?.isPhantom) {
-        const response = await solana.connect();
+      if (typeof window !== 'undefined' && (window as any).phantom?.solana) {
+        const phantom = (window as any).phantom.solana;
+        const response = await phantom.connect();
         const address = response.publicKey.toString();
         setWalletAddress(address);
-        pushLog('SYSTEM', 'SUCCESS', `Identity Anchored: ${address}`);
+        
+        // Create or get user profile
+        if (supabase) {
+          const { data, error } = await supabase.rpc('get_or_create_user', {
+            p_wallet_address: address
+          });
+          
+          if (error) {
+            console.error('[v0] Failed to create user profile:', error);
+          } else {
+            setUserId(data);
+            console.log('[v0] User profile loaded:', data);
+            pushLog('SYSTEM', 'SUCCESS', `Connected: ${address.slice(0, 4)}...${address.slice(-4)}`);
+            
+            // Load user's data
+            await loadUserData(address);
+          }
+        }
       } else {
-        pushLog('SYSTEM', 'ERROR', 'Phantom Wallet not detected in this quadrant.');
-        window.open('https://phantom.app/', '_blank');
+        pushLog('SYSTEM', 'ERROR', 'Phantom wallet not installed');
       }
-    } catch (e: any) {
-      pushLog('SYSTEM', 'ERROR', `Sync Interrupted: ${e.message}`);
+    } catch (error) {
+      pushLog('SYSTEM', 'ERROR', 'Failed to connect wallet');
     }
+  };
+  
+  const loadUserData = async (walletAddr: string) => {
+    if (!supabase) return;
+    
+    console.log('[v0] Loading user data for:', walletAddr);
+    
+    // Load user's knowledge documents
+    const { data: docs } = await supabase
+      .from('knowledge_documents')
+      .select('*')
+      .eq('wallet_address', walletAddr)
+      .order('upload_date', { ascending: false });
+    
+    if (docs) {
+      setKnowledgeDocs(docs);
+      console.log('[v0] Loaded', docs.length, 'documents');
+    }
+    
+    pushLog('SYSTEM', 'INFO', 'Loaded your personal workspace');
   };
 
   const disconnectWallet = async () => {
@@ -994,15 +1030,25 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
     // Create database session
     if (supabase) {
       try {
-        const { data, error } = await supabase.from('roundtable_sessions').insert({
+        const { data: sessionData, error: sessionError } = await supabase.from('roundtable_sessions').insert({
           topic,
           status: 'researching'
         }).select().single();
         
-        if (error) throw error;
-        if (data) {
-          setRoundtableDbId(data.id);
-          console.log('[v0] Database session created:', data.id);
+        if (sessionError) throw sessionError;
+        if (sessionData) {
+          setRoundtableDbId(sessionData.id);
+          console.log('[v0] Database session created:', sessionData.id);
+          
+          // Link session to user if wallet connected
+          if (walletAddress && userId) {
+            await supabase.from('user_roundtable_sessions').insert({
+              id: sessionData.id,
+              user_id: userId,
+              wallet_address: walletAddress
+            });
+            console.log('[v0] Session linked to user');
+          }
         }
       } catch (e: any) {
         console.error('[v0] Failed to create database session:', e);
@@ -1323,13 +1369,18 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                             className="flex-1 bg-white/10 border border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500 transition"
                             disabled={researchingPerson}
                           />
-                          <button
-                            onClick={() => researchPersonAsAgent(agent.id)}
-                            disabled={!personResearchName.trim() || researchingPerson}
-                            className="bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 font-semibold px-3 py-1.5 rounded text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {researchingPerson ? 'Researching...' : 'Research'}
-                          </button>
+        <button
+          onClick={connectWallet}
+          disabled={!!walletAddress}
+          className={`backdrop-blur-md border px-6 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-2 ${
+            walletAddress 
+              ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30' 
+              : 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-white/10 hover:border-white/30'
+          }`}
+          >
+          {walletAddress && <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />}
+          {walletAddress ? `Your Space: ${walletAddress.slice(0,4)}...${walletAddress.slice(-4)}` : 'Connect Phantom'}
+        </button>
                         </div>
                         <p className="text-xs text-white/40 mt-1">
                           AI will deeply research this person's decision-making style and board behavior
@@ -1562,6 +1613,7 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                           file_size: file.size,
                           storage_url: publicUrl,
                           extracted_text: extractedText,
+                          wallet_address: walletAddress || 'anonymous',
                           metadata: {
                             original_name: file.name,
                             upload_source: 'client'
