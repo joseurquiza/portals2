@@ -1,7 +1,7 @@
 
 const resolveEnv = (key: string): string | undefined => {
   if (typeof window === 'undefined') return undefined;
-  return localStorage.getItem(key);
+  return localStorage.getItem(key) || undefined;
 };
 
 export const getSupabaseConfig = () => ({
