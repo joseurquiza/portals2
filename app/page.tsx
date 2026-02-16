@@ -823,10 +823,11 @@ ${allResearch}
 
 ${personalityTraits ? `PERSONALITY: ${personalityTraits}\n\n` : ''}
 
-CRITICAL TURN-TAKING RULES - YOU MUST FOLLOW THESE EXACTLY:
-1. DO NOT speak unless:
-   - Someone directly says your name ("${agent.name}")
-   - You hear a natural pause of 3+ seconds
+DISCUSSION PROTOCOL:
+1. You WILL actively participate in this live discussion
+2. ${agent.id === 'oracle' ? 'As Chairman, you lead the discussion and should speak first to introduce the topic' : `Wait for the Chairman to introduce the topic, then contribute when it's relevant to your expertise`}
+3. When someone addresses you by name, respond directly
+4. Keep responses concise (15-30 seconds of speaking)
    - Someone asks a question related to your expertise area
    
 2. When you DO speak:
@@ -962,9 +963,28 @@ FORBIDDEN:
     const chairmanSessionObj = sessionsRef.current.get('oracle');
     if (chairmanSessionObj) {
       const chairmanSession = await chairmanSessionObj.promise;
+      // Send a user message to trigger the Chairman to speak
       chairmanSession.sendRealtimeInput({
-        text: `Welcome board members. Let's begin our discussion on: "${roundtableSession.topic}". As Chairman, I'll start by sharing my perspective, then I'd like to hear from each of you. Let me open with my thoughts based on the research...`
+        text: `START THE BOARD DISCUSSION NOW. Welcome everyone and introduce the topic: "${roundtableSession.topic}". Share your opening perspective as Chairman based on your research, then invite others to contribute. BEGIN SPEAKING NOW.`
       });
+      
+      console.log('[v0] Discussion prompt sent to Chairman');
+      
+      // After Chairman speaks, prompt each board member to contribute
+      setTimeout(async () => {
+        for (const agent of AGENTS.slice(1)) { // Skip Chairman (first agent)
+          const agentSessionObj = sessionsRef.current.get(agent.id);
+          if (agentSessionObj) {
+            setTimeout(async () => {
+              const agentSession = await agentSessionObj.promise;
+              agentSession.sendRealtimeInput({
+                text: `${agent.name}, please share your perspective on "${roundtableSession.topic}" based on your research and expertise in ${agent.description}. Contribute to the discussion now.`
+              });
+              console.log(`[v0] Prompted ${agent.name} to contribute`);
+            }, AGENTS.indexOf(agent) * 15000); // Stagger by 15 seconds each
+          }
+        }
+      }, 20000); // Start prompting others after 20 seconds
     }
   };
   
