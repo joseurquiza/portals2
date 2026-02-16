@@ -670,7 +670,7 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     setFocusedAgentId(null);
     
     // Save research to database
-    if (roundtableDbId && supabase) {
+    if (roundtableDbId && supabase && roundtableSession) {
       console.log('[v0] Saving research to database...');
       try {
         for (const research of roundtableSession.research) {
@@ -933,26 +933,12 @@ FORBIDDEN:
           }
         },
         config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice } } },
           systemInstruction,
-          voice: agent.voice,
-          tools: [
-            {
-              function_declarations: [{
-                name: 'searchKnowledge',
-                description: 'Search the company knowledge base for relevant information',
-                parameters: {
-                  type: Type.OBJECT,
-                  properties: {
-                    query: {
-                      type: Type.STRING,
-                      description: 'Search query for the knowledge base',
-                    },
-                  },
-                  required: ['query'],
-                },
-              }],
-            },
-          ],
+          tools: [{ functionDeclarations: [searchKnowledgeDeclaration] }],
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
         },
       });
       
