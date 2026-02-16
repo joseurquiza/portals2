@@ -773,32 +773,10 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
       const agentSources = new Set<AudioBufferSourceNode>();
       let currentOutputBuffer = "";
       
+      // Audio output - only connect to master for user to hear
       const agentOutputGain = ctx.createGain();
       agentOutputNodesRef.current.set(agent.id, agentOutputGain);
       agentOutputGain.connect(masterOutputRef.current!);
-      
-      const agentInputMixer = ctx.createGain();
-      micGainRef.current!.connect(agentInputMixer);
-      
-      // Each agent hears all other agents
-      agentOutputNodesRef.current.forEach((otherOutput, otherId) => {
-        if (otherId !== agent.id) otherOutput.connect(agentInputMixer);
-      });
-      agentInputMixersRef.current.forEach((otherMixer, otherId) => {
-        if (otherId !== agent.id) agentOutputGain.connect(otherMixer);
-      });
-      agentInputMixersRef.current.set(agent.id, agentInputMixer);
-      
-      const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
-      scriptProcessor.onaudioprocess = (e) => {
-        const inputData = e.inputBuffer.getChannelData(0);
-        const int16 = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-        const pcmBlob: Blob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
-        sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
-      };
-      agentInputMixer.connect(scriptProcessor);
-      scriptProcessor.connect(ctx.destination);
       
       // Get agent's research for context
       const agentResearch = roundtableSession?.research.find(r => r.agentId === agent.id);
@@ -898,7 +876,7 @@ FORBIDDEN:
               // Save to discussion history
               const newDiscussion: RoundtableDiscussion = {
                 fromAgentId: agent.id,
-                toAgentId: null, // Will be parsed from text if addressing someone
+                toAgentId: null,
                 message: textContent,
                 timestamp: Date.now()
               };
@@ -919,6 +897,17 @@ FORBIDDEN:
                   from_agent_name: agent.name,
                   message: textContent
                 });
+              }
+              
+              // Broadcast transcript to all other agents so they know what was said
+              for (const [otherId, sessionObj] of sessionsRef.current.entries()) {
+                if (otherId !== agent.id) {
+                  const otherSession = await sessionObj.promise;
+                  otherSession.sendRealtimeInput({
+                    text: `[${agent.name} just said: "${textContent}"]`
+                  });
+                  console.log(`[v0] Sent transcript to ${AGENTS.find(a => a.id === otherId)?.name}`);
+                }
               }
             }
             
