@@ -54,10 +54,10 @@ This project has been **converted from Vite to Next.js 16**. Key changes:
 
 ### Optional: Database Setup
 
-To enable session persistence, configure Supabase:
-1. Click "Configure Database" in the app
-2. Enter your Supabase URL and Anon Key
-3. Credentials are stored in localStorage
+To enable session persistence with Supabase:
+1. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in localStorage (browser dev tools)
+2. The app will automatically connect to your Supabase instance
+3. Session data and knowledge documents will be stored in your database
 
 ## Features
 

@@ -156,12 +156,6 @@ const searchKnowledgeDeclaration: FunctionDeclaration = {
 };
 
 const App: React.FC = () => {
-  const [config, setConfig] = useState({
-    supabaseUrl: typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_URL') || '' : '',
-    supabaseKey: typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_ANON_KEY') || '' : ''
-  });
-  
-  const [showConfig, setShowConfig] = useState(!config.supabaseUrl);
   const [view, setView] = useState<'home' | 'portal' | 'roundtable'>('home');
   const [activeAgent, setActiveAgent] = useState<AgentConfig>(AGENTS[0]);
   const [collaborators, setCollaborators] = useState<AgentConfig[]>([]);
@@ -224,14 +218,17 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initSupabaseClient = async () => {
-      if (config.supabaseUrl && config.supabaseKey) {
+      const supabaseUrl = typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_URL') : null;
+      const supabaseKey = typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_ANON_KEY') : null;
+      
+      if (supabaseUrl && supabaseKey) {
         const { createClient } = await import('@supabase/supabase-js');
-        setSupabase(createClient(config.supabaseUrl, config.supabaseKey));
+        setSupabase(createClient(supabaseUrl, supabaseKey));
         pushLog('SYSTEM', 'INFO', 'Matrix Database Link Latched.');
       }
     };
     initSupabaseClient();
-  }, [config.supabaseUrl, config.supabaseKey, pushLog]);
+  }, [pushLog]);
 
   // Phantom Wallet logic
   useEffect(() => {
@@ -801,49 +798,9 @@ Format in markdown with headers (##) and bullet points.`;
     return () => cancelAnimationFrame(frameId);
   }, [status]);
 
-  const handleSaveConfig = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('SUPABASE_URL', config.supabaseUrl);
-      localStorage.setItem('SUPABASE_ANON_KEY', config.supabaseKey);
-      setShowConfig(false);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
-      {/* Config Modal */}
-      {showConfig && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-md w-full shadow-2xl">
-            <h2 className="text-2xl font-bold mb-4 font-outfit">System Configuration</h2>
-            <p className="text-sm text-white/60 mb-6">Connect to your Supabase database to enable session persistence.</p>
-            <input 
-              type="text" 
-              placeholder="Supabase URL" 
-              value={config.supabaseUrl}
-              onChange={(e) => setConfig({...config, supabaseUrl: e.target.value})}
-              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:border-cyan-500 transition"
-            />
-            <input 
-              type="password" 
-              placeholder="Supabase Anon Key" 
-              value={config.supabaseKey}
-              onChange={(e) => setConfig({...config, supabaseKey: e.target.value})}
-              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-6 focus:outline-none focus:border-cyan-500 transition"
-            />
-            <div className="flex gap-3">
-              <button onClick={handleSaveConfig} className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-3 rounded-lg transition">
-                Save & Continue
-              </button>
-              <button onClick={() => setShowConfig(false)} className="px-6 bg-white/10 hover:bg-white/20 rounded-lg transition">
-                Skip
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Wallet & Debug Header */}
+  <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
+  {/* Wallet & Debug Header */}
       <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-6 z-40">
         <button 
           onClick={handleWalletAction}
@@ -922,12 +879,6 @@ Format in markdown with headers (##) and bullet points.`;
                 className="text-sm text-white/60 hover:text-white/90 transition underline"
               >
                 Knowledge Base
-              </button>
-              <button 
-                onClick={() => setShowConfig(true)}
-                className="text-sm text-white/40 hover:text-white/80 transition underline"
-              >
-                Configure Database
               </button>
             </div>
           </div>
@@ -1201,15 +1152,17 @@ Format in markdown with headers (##) and bullet points.`;
                     onClick={async () => {
                       if (confirm(`Delete ${doc.filename}?`)) {
                         // Delete from database
-                        const { createClient } = await import('@supabase/supabase-js');
-                        const supabase = createClient(
-                          config.supabaseUrl,
-                          config.supabaseKey
-                        );
+                        const supabaseUrl = localStorage.getItem('SUPABASE_URL');
+                        const supabaseKey = localStorage.getItem('SUPABASE_ANON_KEY');
                         
-                        await supabase.from('knowledge_documents').delete().eq('id', doc.id);
-                        setKnowledgeDocs(prev => prev.filter(d => d.id !== doc.id));
-                        pushLog('SYSTEM', 'INFO', `Deleted: ${doc.filename}`);
+                        if (supabaseUrl && supabaseKey) {
+                          const { createClient } = await import('@supabase/supabase-js');
+                          const supabase = createClient(supabaseUrl, supabaseKey);
+                          
+                          await supabase.from('knowledge_documents').delete().eq('id', doc.id);
+                          setKnowledgeDocs(prev => prev.filter(d => d.id !== doc.id));
+                          pushLog('SYSTEM', 'INFO', `Deleted: ${doc.filename}`);
+                        }
                       }
                     }}
                     className="text-red-400 hover:text-red-300 text-sm"
@@ -1224,12 +1177,12 @@ Format in markdown with headers (##) and bullet points.`;
               <button
                 onClick={async () => {
                   // Load existing documents
-                  if (config.supabaseUrl && config.supabaseKey) {
+                  const supabaseUrl = localStorage.getItem('SUPABASE_URL');
+                  const supabaseKey = localStorage.getItem('SUPABASE_ANON_KEY');
+                  
+                  if (supabaseUrl && supabaseKey) {
                     const { createClient } = await import('@supabase/supabase-js');
-                    const supabase = createClient(
-                      config.supabaseUrl,
-                      config.supabaseKey
-                    );
+                    const supabase = createClient(supabaseUrl, supabaseKey);
                     
                     const { data } = await supabase
                       .from('knowledge_documents')
