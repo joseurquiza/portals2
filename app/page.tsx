@@ -835,53 +835,117 @@ Format in markdown with headers (##) and bullet points.`;
 
       {/* HOME VIEW */}
       {view === 'home' && (
-        <div className="flex flex-col items-center justify-center min-h-screen relative z-10 px-4">
-          <h1 className="text-6xl md:text-8xl font-bold mb-4 font-outfit bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
-            BoardRoom
-          </h1>
-          <p className="text-xl md:text-2xl text-white/60 mb-8 max-w-2xl mx-auto font-light">
-            Your AI Board of Directors for Startups
-          </p>
-          <p className="text-white/60 text-lg mb-12 text-center max-w-md">
-            Summon specialized AI agents into a live, voice-powered collaboration cluster.
-          </p>
-          
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl w-full">
-            {AGENTS.map(agent => (
-              <button 
-                key={agent.id}
-                onClick={() => startCluster(agent)}
-                className="group relative bg-gradient-to-br from-white/5 to-white/[0.02] backdrop-blur-sm border border-white/10 hover:border-white/30 rounded-2xl p-6 transition-all hover:scale-105 hover:shadow-2xl overflow-hidden"
-              >
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{background: `radial-gradient(circle at 50% 50%, ${agent.colors.glow}22, transparent)`}} />
-                <div className="relative z-10">
-                  <div className={`w-12 h-12 rounded-full ${agent.colors.primary} mb-4 shadow-lg`} style={{boxShadow: `0 0 30px ${agent.colors.glow}66`}} />
-                  <h3 className="text-xl font-bold mb-2 font-outfit">{agent.name}</h3>
-                  <p className="text-sm text-white/60">{agent.description}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-          
-          <div className="mt-12 flex flex-col gap-4 items-center">
-            <button 
-              onClick={() => setShowRoundtableInput(true)}
-              className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold rounded-full transition-all shadow-lg hover:shadow-purple-500/50"
-            >
-              Start Roundtable
-            </button>
-            <div className="flex gap-4">
+        <div className="flex flex-col min-h-screen relative z-10">
+          {/* Hero Section */}
+          <div className="flex-1 flex flex-col items-center justify-center px-4 py-20">
+            <div className="max-w-6xl mx-auto text-center mb-20">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 mb-8 backdrop-blur-sm">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                <span className="text-sm text-white/70">AI-Powered Board Advisors</span>
+              </div>
+              
+              <h1 className="text-7xl md:text-8xl lg:text-9xl font-bold mb-8 font-outfit leading-none tracking-tight">
+                <span className="bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-transparent">
+                  BoardRoom
+                </span>
+              </h1>
+              
+              <p className="text-2xl md:text-3xl lg:text-4xl text-white/80 mb-6 font-light leading-tight max-w-4xl mx-auto">
+                Your AI Board of Directors for Startups
+              </p>
+              
+              <p className="text-lg md:text-xl text-white/50 mb-12 max-w-2xl mx-auto leading-relaxed">
+                Five specialized AI agents providing expert guidance through live voice conversations, collaborative discussions, and intelligent knowledge search.
+              </p>
+              
+              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-16">
+                <button 
+                  onClick={() => setShowRoundtableInput(true)}
+                  className="group relative px-8 py-4 bg-white text-black font-semibold rounded-xl transition-all hover:scale-105 hover:shadow-2xl hover:shadow-white/20"
+                >
+                  Start Board Meeting
+                  <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 opacity-0 group-hover:opacity-100 transition-opacity -z-10 blur-xl" />
+                </button>
+                <button 
+                  onClick={() => setShowKnowledgeBase(true)}
+                  className="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white font-semibold rounded-xl transition-all backdrop-blur-sm"
+                >
+                  Upload Company Data
+                </button>
+              </div>
+            </div>
+            
+            {/* Agent Cards */}
+            <div className="max-w-7xl w-full px-4">
+              <div className="text-center mb-12">
+                <h2 className="text-3xl md:text-4xl font-bold mb-4 font-outfit">Meet Your Board Members</h2>
+                <p className="text-white/60 text-lg">Click any advisor to start a live voice session</p>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                {AGENTS.map((agent, idx) => (
+                  <button 
+                    key={agent.id}
+                    onClick={() => startCluster(agent)}
+                    className="group relative bg-gradient-to-b from-white/[0.07] to-white/[0.02] backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-2xl p-8 transition-all hover:-translate-y-2 hover:shadow-2xl overflow-hidden"
+                    style={{
+                      animationDelay: `${idx * 100}ms`,
+                      animation: 'fadeInUp 0.6s ease-out forwards',
+                      opacity: 0
+                    }}
+                  >
+                    {/* Glow Effect */}
+                    <div 
+                      className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700" 
+                      style={{background: `radial-gradient(circle at 50% 0%, ${agent.colors.glow}15, transparent 70%)`}} 
+                    />
+                    
+                    {/* Content */}
+                    <div className="relative z-10 flex flex-col items-center text-center">
+                      <div 
+                        className={`w-20 h-20 rounded-2xl ${agent.colors.primary} mb-6 shadow-lg transition-transform group-hover:scale-110 group-hover:rotate-3 flex items-center justify-center`} 
+                        style={{boxShadow: `0 10px 40px ${agent.colors.glow}40`}}
+                      >
+                        <span className="text-3xl">
+                          {agent.id === 'oracle' && '🔮'}
+                          {agent.id === 'architect' && '🏗️'}
+                          {agent.id === 'ledger' && '💰'}
+                          {agent.id === 'muse' && '🎨'}
+                          {agent.id === 'sentinel' && '🛡️'}
+                        </span>
+                      </div>
+                      <h3 className="text-2xl font-bold mb-3 font-outfit group-hover:text-white transition-colors">{agent.name}</h3>
+                      <p className="text-sm text-white/60 leading-relaxed mb-4">{agent.description}</p>
+                      <div className="flex items-center gap-2 text-xs text-white/40">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span>Available now</span>
+                      </div>
+                    </div>
+                    
+                    {/* Hover Arrow */}
+                    <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                      <svg className="w-5 h-5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                      </svg>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {/* Quick Actions */}
+            <div className="mt-20 flex flex-wrap gap-6 justify-center text-sm">
               <button 
                 onClick={() => setShowPersonalityEditor(true)}
-                className="text-sm text-white/60 hover:text-white/90 transition underline"
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all group"
               >
-                Customize Personalities
+                <span className="text-white/70 group-hover:text-white transition-colors">⚙️ Customize Personalities</span>
               </button>
               <button 
                 onClick={() => setShowKnowledgeBase(true)}
-                className="text-sm text-white/60 hover:text-white/90 transition underline"
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all group"
               >
-                Knowledge Base
+                <span className="text-white/70 group-hover:text-white transition-colors">📚 Knowledge Base</span>
               </button>
             </div>
           </div>
