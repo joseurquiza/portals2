@@ -669,16 +669,20 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
     setFocusedAgentId(null);
     
-    // Save research to database
+    // Save research to database with queries
     if (roundtableDbId && supabase && roundtableSession) {
       console.log('[v0] Saving research to database...');
       try {
         for (const research of roundtableSession.research) {
           const agent = AGENTS.find(a => a.id === research.agentId);
+          // Reconstruct the query that was used
+          const query = `You are ${agent?.name}. ${agent?.description}\n\nResearch this topic from your unique perspective: "${roundtableSession.topic}"\n\nProvide your key findings in 2-3 sentences. Focus on insights relevant to your specialty.`;
+          
           await supabase.from('roundtable_research').insert({
             session_id: roundtableDbId,
             agent_id: research.agentId,
             agent_name: agent?.name || research.agentId,
+            query: query,
             findings: research.findings,
             status: research.status
           });
