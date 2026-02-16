@@ -7,9 +7,9 @@ export const maxDuration = 60; // 60 seconds for file processing
 
 export async function POST(request: NextRequest) {
   try {
-    // Get Supabase config from localStorage (passed via request body)
+    // Get Supabase config from request
     const formData = await request.formData();
-    const files = formData.getAll('files') as File[];
+    const file = formData.get('file') as File;
     const supabaseUrl = formData.get('supabaseUrl') as string;
     const supabaseKey = formData.get('supabaseKey') as string;
 
@@ -20,20 +20,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!files || files.length === 0) {
+    if (!file) {
       return NextResponse.json(
-        { error: 'No files provided' },
+        { error: 'No file provided' },
         { status: 400 }
       );
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const results = [];
-
-    for (const file of files) {
-      try {
-        // Process the file to extract text
-        const processed = await processFile(file);
+    
+    try {
+      // Process the file to extract text
+      const processed = await processFile(file);
 
         // Upload file to Supabase Storage
         const fileExt = file.name.split('.').pop();
@@ -84,27 +82,27 @@ export async function POST(request: NextRequest) {
 
         if (dbError) throw dbError;
 
-        results.push({
+      return NextResponse.json({
+        message: `Successfully uploaded ${file.name}`,
+        results: [{
           success: true,
           filename: file.name,
           documentId: docData.id,
           extractedLength: processed.extractedText.length,
-        });
-      } catch (fileError: any) {
-        console.error(`Error processing ${file.name}:`, fileError);
-        results.push({
+        }],
+        document: docData
+      });
+    } catch (fileError: any) {
+      console.error(`Error processing ${file.name}:`, fileError);
+      return NextResponse.json({
+        message: `Failed to upload ${file.name}`,
+        results: [{
           success: false,
           filename: file.name,
           error: fileError.message,
-        });
-      }
+        }]
+      }, { status: 500 });
     }
-
-    const successCount = results.filter(r => r.success).length;
-    return NextResponse.json({
-      message: `Uploaded ${successCount} of ${files.length} files successfully`,
-      results,
-    });
 
   } catch (error: any) {
     console.error('Upload error:', error);
