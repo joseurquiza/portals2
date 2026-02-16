@@ -604,9 +604,13 @@ const App: React.FC = () => {
     pushLog('SYSTEM', 'INFO', 'All agents researching topic...');
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
-    // Each agent does independent research
-    const researchPromises = AGENTS.map(async (agent) => {
+    // Research agents sequentially to show live progress
+    for (const agent of AGENTS) {
       try {
+        // Mark as actively researching
+        setFocusedAgentId(agent.id);
+        pushLog('SYSTEM', 'INFO', `${agent.name} researching...`);
+        
         const prompt = `You are ${agent.name}. ${agent.description}
 
 Research this topic from your unique perspective: "${topic}"
@@ -632,14 +636,23 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
         });
         
         pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
-        return { agentId: agent.id, findings };
       } catch (e: any) {
         pushLog('SYSTEM', 'ERROR', `${agent.name} research failed: ${e.message}`);
-        return { agentId: agent.id, findings: 'Research unavailable' };
+        setRoundtableSession(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            research: prev.research.map(r => 
+              r.agentId === agent.id 
+                ? { ...r, findings: 'Research unavailable', status: 'complete' as const }
+                : r
+            )
+          };
+        });
       }
-    });
+    }
     
-    await Promise.all(researchPromises);
+    setFocusedAgentId(null);
     
     // Move to discussion phase
     setTimeout(() => startDiscussion(), 2000);
@@ -1441,34 +1454,69 @@ Format in markdown with headers (##) and bullet points.`;
                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                   <span className="text-2xl">🔍</span>
                   Research Phase
+                  <span className="ml-auto text-xs text-white/40">
+                    {roundtableSession.research.filter(r => r.status === 'complete').length} / {AGENTS.length} complete
+                  </span>
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {roundtableSession.research.map((research) => {
                     const agent = AGENTS.find(a => a.id === research.agentId);
+                    const isActivelyResearching = focusedAgentId === agent?.id && research.status === 'researching';
                     if (!agent) return null;
                     return (
                       <div 
                         key={research.agentId}
-                        className={`bg-white/5 border ${research.status === 'complete' ? 'border-emerald-500/50' : 'border-white/10'} rounded-xl p-4 transition-all`}
+                        className={`relative bg-white/5 border rounded-xl p-4 transition-all ${
+                          research.status === 'complete' 
+                            ? 'border-emerald-500/50' 
+                            : isActivelyResearching 
+                            ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/20' 
+                            : 'border-white/10'
+                        } ${isActivelyResearching ? 'scale-105' : ''}`}
                       >
-                        <div className="flex items-center gap-2 mb-3">
+                        {/* Active research glow */}
+                        {isActivelyResearching && (
                           <div 
-                            className={`w-3 h-3 rounded-full ${agent.colors.primary}`}
-                            style={{boxShadow: `0 0 10px ${agent.colors.glow}`}}
+                            className="absolute inset-0 rounded-xl opacity-20 animate-pulse"
+                            style={{background: `radial-gradient(circle at 50% 50%, ${agent.colors.glow}, transparent 70%)`}}
                           />
-                          <span className="font-bold">{agent.name}</span>
-                          {research.status === 'researching' && (
-                            <div className="ml-auto">
-                              <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                        )}
+                        
+                        <div className="relative z-10">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div 
+                              className={`w-3 h-3 rounded-full ${agent.colors.primary} transition-all ${isActivelyResearching ? 'animate-pulse' : ''}`}
+                              style={{boxShadow: `0 0 ${isActivelyResearching ? '20px' : '10px'} ${agent.colors.glow}`}}
+                            />
+                            <span className="font-bold">{agent.name}</span>
+                            {research.status === 'researching' && (
+                              <div className="ml-auto flex items-center gap-2">
+                                {isActivelyResearching && (
+                                  <span className="text-xs text-cyan-400 font-semibold">Researching now</span>
+                                )}
+                                <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                              </div>
+                            )}
+                            {research.status === 'complete' && (
+                              <div className="ml-auto flex items-center gap-1">
+                                <span className="text-xs text-emerald-400">Done</span>
+                                <div className="text-emerald-400">✓</div>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {research.findings ? (
+                            <p className="text-sm text-white/70 leading-relaxed">
+                              {research.findings}
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="h-2 bg-white/10 rounded animate-pulse" style={{width: '100%'}} />
+                              <div className="h-2 bg-white/10 rounded animate-pulse" style={{width: '85%'}} />
+                              <div className="h-2 bg-white/10 rounded animate-pulse" style={{width: '60%'}} />
                             </div>
                           )}
-                          {research.status === 'complete' && (
-                            <div className="ml-auto text-emerald-400">✓</div>
-                          )}
                         </div>
-                        <p className="text-sm text-white/70">
-                          {research.findings || 'Researching...'}
-                        </p>
                       </div>
                     );
                   })}
