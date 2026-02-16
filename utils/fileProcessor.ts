@@ -1,5 +1,4 @@
 // File processing utilities for knowledge base
-import { createWorker } from 'tesseract.js';
 
 export interface ProcessedDocument {
   filename: string;
@@ -70,36 +69,15 @@ function getFileTypeFromName(filename: string): string {
 }
 
 async function extractTextFromPDF(file: File): Promise<string> {
-  // Use pdf.js via CDN in browser or pdf-parse in Node
-  const arrayBuffer = await file.arrayBuffer();
-  
-  // Dynamic import of pdfjs-dist (client-side)
-  if (typeof window !== 'undefined') {
-    const pdfjsLib = await import('pdfjs-dist');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-    
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let fullText = '';
-    
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map((item: any) => item.str).join(' ');
-      fullText += pageText + '\n';
-    }
-    
-    return fullText.trim();
-  }
-  
-  return 'PDF processing not available in this environment';
+  // For now, return a placeholder. PDF processing requires server-side libraries
+  // that need to be configured separately (like pdf-parse)
+  return `PDF file: ${file.name} (${(file.size / 1024).toFixed(2)} KB). Text extraction pending - please use search by filename.`;
 }
 
 async function extractTextFromImage(file: File): Promise<string> {
-  // Use Tesseract.js for OCR
-  const worker = await createWorker('eng');
-  const { data: { text } } = await worker.recognize(file);
-  await worker.terminate();
-  return text;
+  // OCR processing is resource-intensive and requires Tesseract worker
+  // For now, return placeholder
+  return `Image file: ${file.name} (${(file.size / 1024).toFixed(2)} KB). OCR text extraction pending - please use search by filename.`;
 }
 
 async function extractTextFromCSV(file: File): Promise<string> {
@@ -116,11 +94,8 @@ async function extractTextFromCSV(file: File): Promise<string> {
 }
 
 async function extractTextFromExcel(file: File): Promise<string> {
-  // Use xlsx library
-  const arrayBuffer = await file.arrayBuffer();
-  
-  // Dynamic import for xlsx
-  if (typeof window !== 'undefined') {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
     const XLSX = await import('xlsx');
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     
@@ -132,9 +107,9 @@ async function extractTextFromExcel(file: File): Promise<string> {
     });
     
     return fullText.trim();
+  } catch (error: any) {
+    return `Excel file: ${file.name} (${(file.size / 1024).toFixed(2)} KB). Processing error: ${error.message}`;
   }
-  
-  return 'Excel processing not available in this environment';
 }
 
 export function truncateText(text: string, maxLength: number = 5000): string {

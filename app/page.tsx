@@ -175,6 +175,7 @@ const App: React.FC = () => {
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDocument[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<{filename: string, status: string, progress: number}[]>([]);
   
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
   const [intensity, setIntensity] = useState(0);
@@ -1146,6 +1147,40 @@ Format in markdown with headers (##) and bullet points.`;
               </button>
             </div>
 
+            {/* Upload Progress */}
+            {uploadProgress.length > 0 && (
+              <div className="mb-6 space-y-2 bg-white/5 rounded-xl p-4 border border-white/10">
+                <div className="text-sm font-semibold mb-3">Upload Progress</div>
+                {uploadProgress.map((item, idx) => (
+                  <div key={idx} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/70 truncate max-w-[200px]">{item.filename}</span>
+                      <span className={`font-semibold ${
+                        item.status === 'complete' ? 'text-emerald-400' :
+                        item.status === 'error' ? 'text-red-400' :
+                        'text-cyan-400'
+                      }`}>
+                        {item.status === 'checking' && 'Checking...'}
+                        {item.status === 'uploading' && 'Uploading...'}
+                        {item.status === 'complete' && '✓ Complete'}
+                        {item.status === 'error' && '✗ Failed'}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ${
+                          item.status === 'complete' ? 'bg-emerald-400' :
+                          item.status === 'error' ? 'bg-red-400' :
+                          'bg-cyan-400'
+                        }`}
+                        style={{width: `${item.progress}%`}}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Upload Area */}
             <div className="border-2 border-dashed border-white/20 rounded-xl p-8 mb-6 hover:border-cyan-500/50 transition">
               <input
@@ -1167,20 +1202,44 @@ Format in markdown with headers (##) and bullet points.`;
                   }
                   
                   setUploadingFiles(true);
+                  setUploadProgress([]);
                   pushLog('SYSTEM', 'INFO', `Uploading ${files.length} file(s)...`);
+                  console.log('[v0] Starting upload of', files.length, 'files');
                   
-                  for (const file of files) {
+                  for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const fileNum = i + 1;
+                    
+                    // Add to progress tracking
+                    setUploadProgress(prev => [...prev, {
+                      filename: file.name,
+                      status: 'checking',
+                      progress: 0
+                    }]);
+                    
+                    console.log(`[v0] [${fileNum}/${files.length}] Processing ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
+                    
                     // Check file size on client side (50MB limit)
                     const maxSize = 50 * 1024 * 1024;
                     if (file.size > maxSize) {
+                      console.log('[v0] File too large:', file.name);
                       pushLog('SYSTEM', 'ERROR', `File too large: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB). Max 50MB.`);
+                      setUploadProgress(prev => prev.map(p => 
+                        p.filename === file.name ? {...p, status: 'error', progress: 100} : p
+                      ));
                       continue;
                     }
+
+                    setUploadProgress(prev => prev.map(p => 
+                      p.filename === file.name ? {...p, status: 'uploading', progress: 30} : p
+                    ));
 
                     const formData = new FormData();
                     formData.append('file', file);
                     formData.append('supabaseUrl', supabaseUrl);
                     formData.append('supabaseKey', supabaseKey);
+                    
+                    console.log('[v0] Sending upload request for:', file.name);
                     
                     try {
                       const res = await fetch('/api/knowledge/upload', {
@@ -1188,10 +1247,23 @@ Format in markdown with headers (##) and bullet points.`;
                         body: formData
                       });
                       
+                      console.log('[v0] Upload response status:', res.status, res.statusText);
+                      
+                      setUploadProgress(prev => prev.map(p => 
+                        p.filename === file.name ? {...p, progress: 60} : p
+                      ));
+                      
                       if (res.ok) {
                         const data = await res.json();
+                        console.log('[v0] Upload successful:', data);
                         pushLog('SYSTEM', 'SUCCESS', `Uploaded: ${file.name}`);
+                        
+                        setUploadProgress(prev => prev.map(p => 
+                          p.filename === file.name ? {...p, status: 'complete', progress: 100} : p
+                        ));
+                        
                         // Refresh the document list
+                        console.log('[v0] Refreshing document list...');
                         if (data.results && data.results.length > 0) {
                           const { createClient } = await import('@supabase/supabase-js');
                           const supabase = createClient(supabaseUrl, supabaseKey);
@@ -1201,6 +1273,7 @@ Format in markdown with headers (##) and bullet points.`;
                             .order('upload_date', { ascending: false })
                             .limit(1);
                           if (docs && docs[0]) {
+                            console.log('[v0] Added document to list:', docs[0].filename);
                             setKnowledgeDocs(prev => [docs[0], ...prev]);
                           }
                         }
@@ -1210,19 +1283,29 @@ Format in markdown with headers (##) and bullet points.`;
                         try {
                           const error = await res.json();
                           errorMessage = error.error || error.message || 'Unknown error';
+                          console.log('[v0] Upload error response:', error);
                         } catch {
                           const text = await res.text();
                           errorMessage = text.substring(0, 100);
+                          console.log('[v0] Upload error text:', text);
                         }
                         pushLog('SYSTEM', 'ERROR', `Failed: ${file.name} - ${errorMessage}`);
+                        setUploadProgress(prev => prev.map(p => 
+                          p.filename === file.name ? {...p, status: 'error', progress: 100} : p
+                        ));
                       }
                     } catch (err: any) {
-                      console.error('[v0] Upload error:', err);
+                      console.error('[v0] Upload exception:', err);
                       pushLog('SYSTEM', 'ERROR', `Upload error: ${file.name} - ${err.message}`);
+                      setUploadProgress(prev => prev.map(p => 
+                        p.filename === file.name ? {...p, status: 'error', progress: 100} : p
+                      ));
                     }
                   }
                   
+                  console.log('[v0] Upload process complete');
                   setUploadingFiles(false);
+                  setTimeout(() => setUploadProgress([]), 3000); // Clear after 3 seconds
                   e.target.value = '';
                 }}
               />

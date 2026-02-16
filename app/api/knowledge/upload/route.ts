@@ -15,12 +15,17 @@ export const config = {
 };
 
 export async function POST(request: NextRequest) {
+  console.log('[v0] Upload API called');
   try {
     // Get Supabase config from request
     const formData = await request.formData();
+    console.log('[v0] FormData parsed');
     const file = formData.get('file') as File;
     const supabaseUrl = formData.get('supabaseUrl') as string;
     const supabaseKey = formData.get('supabaseKey') as string;
+    
+    console.log('[v0] File:', file?.name, file?.size, file?.type);
+    console.log('[v0] Supabase config:', { url: !!supabaseUrl, key: !!supabaseKey });
 
     if (!supabaseUrl || !supabaseKey) {
       return NextResponse.json(
@@ -46,19 +51,25 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
+    console.log('[v0] Supabase client created');
     
     try {
       // Process the file to extract text
+      console.log('[v0] Starting file processing...');
       const processed = await processFile(file);
+      console.log('[v0] File processed, extracted text length:', processed.extractedText.length);
 
         // Upload file to Supabase Storage
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
         const filePath = `knowledge/${fileName}`;
 
+        console.log('[v0] Uploading to storage:', filePath);
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('knowledge-base')
           .upload(filePath, file);
+        
+        console.log('[v0] Upload result:', { success: !!uploadData, error: uploadError?.message });
 
         if (uploadError) {
           // Create bucket if it doesn't exist
@@ -85,6 +96,7 @@ export async function POST(request: NextRequest) {
           .getPublicUrl(filePath);
 
         // Insert document metadata into database
+        console.log('[v0] Inserting document into database...');
         const { data: docData, error: dbError } = await supabase
           .from('knowledge_documents')
           .insert({
@@ -98,6 +110,7 @@ export async function POST(request: NextRequest) {
           .select()
           .single();
 
+        console.log('[v0] DB insert result:', { success: !!docData, error: dbError?.message });
         if (dbError) throw dbError;
 
       return NextResponse.json({
