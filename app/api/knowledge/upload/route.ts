@@ -5,6 +5,15 @@ import { processFile } from '@/utils/fileProcessor';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 60 seconds for file processing
 
+// Increase body size limit for file uploads (50MB)
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb',
+    },
+  },
+};
+
 export async function POST(request: NextRequest) {
   try {
     // Get Supabase config from request
@@ -24,6 +33,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'No file provided' },
         { status: 400 }
+      );
+    }
+
+    // Check file size (50MB limit)
+    const maxSize = 50 * 1024 * 1024; // 50MB in bytes
+    if (file.size > maxSize) {
+      return NextResponse.json(
+        { error: `File too large. Maximum size is 50MB, file is ${(file.size / 1024 / 1024).toFixed(2)}MB` },
+        { status: 413 }
       );
     }
 
