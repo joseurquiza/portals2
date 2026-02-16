@@ -636,94 +636,124 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
   const startDiscussion = async () => {
     if (!roundtableSession) return;
     
-    console.log('[v0] DISCUSSION PHASE STARTED');
+    console.log('[v0] DISCUSSION PHASE STARTED - Interactive Agent Mode');
     setRoundtableSession(prev => prev ? { ...prev, status: 'discussing' } : null);
-    pushLog('SYSTEM', 'INFO', 'Agents entering discussion phase...');
+    pushLog('SYSTEM', 'INFO', 'Board members entering discussion...');
     setStatus(ConnectionStatus.CONNECTED);
     
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
-    // Simulate discussion rounds
-    const discussionRounds = 3; // Each agent speaks once per round
-    console.log(`[v0] Discussion will have ${discussionRounds} rounds with ${AGENTS.length} agents`);
+    // Natural conversation flow - agents respond to each other
+    const totalExchanges = 12; // Multiple back-and-forth exchanges
+    console.log(`[v0] Starting ${totalExchanges} conversational exchanges`);
     
-    for (let round = 0; round < discussionRounds; round++) {
-      console.log(`[v0] ROUND ${round + 1}/${discussionRounds} STARTING`);
+    for (let exchange = 0; exchange < totalExchanges; exchange++) {
+      console.log(`[v0] EXCHANGE ${exchange + 1}/${totalExchanges}`);
+      await new Promise(resolve => setTimeout(resolve, 1500));
       
-      for (let i = 0; i < AGENTS.length; i++) {
-        const agent = AGENTS[i];
-        console.log(`[v0] [Round ${round + 1}, Speaker ${i + 1}/${AGENTS.length}] Waiting 2s for ${agent.name} to speak...`);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Pause between speakers
+      try {
+        // Determine which agent should speak next based on context
+        const recentSpeakers = roundtableSession.discussions
+          .slice(-3)
+          .map(d => d.fromAgentId);
         
-        try {
-          const agentResearch = roundtableSession.research.find(r => r.agentId === agent.id);
-          const allResearch = roundtableSession.research
-            .map(r => `${AGENTS.find(a => a.id === r.agentId)?.name}: ${r.findings}`)
-            .join('\n\n');
-          
-          const recentDiscussions = roundtableSession.discussions
-            .slice(-5)
-            .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
-            .join('\n');
-          
-          console.log(`[v0] ${agent.name} - Preparing discussion prompt...`);
-          console.log(`[v0] ${agent.name} - Context: ${recentDiscussions ? 'Has recent discussion' : 'Starting fresh'}`);
-          
-          const prompt = `You are ${agent.name} in a roundtable discussion about: "${roundtableSession.topic}"
+        // Find agent who hasn't spoken recently or who was addressed
+        const lastMessage = roundtableSession.discussions[roundtableSession.discussions.length - 1];
+        let nextAgent: AgentConfig | undefined;
+        
+        // Check if previous message addressed someone
+        if (lastMessage) {
+          const addressedAgentName = AGENTS.find(a => 
+            lastMessage.message.toLowerCase().includes(a.name.toLowerCase()) && 
+            a.id !== lastMessage.fromAgentId
+          );
+          if (addressedAgentName && !recentSpeakers.slice(-2).includes(addressedAgentName.id)) {
+            nextAgent = addressedAgentName;
+            console.log(`[v0] ${addressedAgentName.name} was addressed, will respond`);
+          }
+        }
+        
+        // Otherwise, pick agent who hasn't spoken in last 2 turns
+        if (!nextAgent) {
+          nextAgent = AGENTS.find(a => !recentSpeakers.slice(-2).includes(a.id)) || AGENTS[exchange % AGENTS.length];
+        }
+        
+        const agentResearch = roundtableSession.research.find(r => r.agentId === nextAgent.id);
+        const allResearch = roundtableSession.research
+          .map(r => `${AGENTS.find(a => a.id === r.agentId)?.name}: ${r.findings}`)
+          .join('\n\n');
+        
+        const recentDiscussions = roundtableSession.discussions
+          .slice(-4)
+          .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
+          .join('\n');
+        
+        console.log(`[v0] ${nextAgent.name} preparing to contribute...`);
+        
+        const prompt = `You are ${nextAgent.name}, ${nextAgent.description}
 
-Your research: ${agentResearch?.findings}
+BOARD DISCUSSION: "${roundtableSession.topic}"
 
-All research findings:
+YOUR RESEARCH:
+${agentResearch?.findings}
+
+ALL BOARD MEMBER RESEARCH:
 ${allResearch}
 
-Recent discussion:
-${recentDiscussions || 'Discussion just starting'}
+RECENT DISCUSSION:
+${recentDiscussions || 'Discussion starting - you can open with your perspective'}
 
-This is discussion round ${round + 1} of ${discussionRounds}. ${
-  round === 0 ? 'Share your perspective and react to others\' research.' :
-  round === 1 ? 'Build on what others said and add deeper insights.' :
-  'Synthesize the discussion and offer final thoughts.'
-}
+INSTRUCTIONS:
+- Respond naturally as a board member would
+- You may address other board members by name if asking questions or building on their points
+- Bring your unique expertise (${nextAgent.description})
+- Keep it concise (1-2 sentences)
+- If addressed directly, respond to that person's point
+- You can ask questions, challenge assumptions, or add new insights
+- Be conversational but professional
 
-Respond in 1-2 sentences. Be conversational and reference others' points.`;
+Your response:`;
 
-          console.log(`[v0] ${agent.name} - Sending discussion prompt to Gemini...`);
-          const result = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt
-          });
-          const message = result.text || 'No response available';
-          console.log(`[v0] ${agent.name} said: "${message}"`);
-          
-          const newDiscussion: RoundtableDiscussion = {
-            fromAgentId: agent.id,
-            toAgentId: null,
-            message,
-            timestamp: Date.now()
+        console.log(`[v0] ${nextAgent.name} - Sending to Gemini...`);
+        const result = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: prompt
+        });
+        const message = result.text || 'No response available';
+        console.log(`[v0] ${nextAgent.name}: "${message}"`);
+        
+        // Detect if this message addresses another agent
+        const addressedAgent = AGENTS.find(a => 
+          a.id !== nextAgent.id && 
+          message.toLowerCase().includes(a.name.toLowerCase())
+        );
+        
+        const newDiscussion: RoundtableDiscussion = {
+          fromAgentId: nextAgent.id,
+          toAgentId: addressedAgent?.id || null,
+          message,
+          timestamp: Date.now()
+        };
+        
+        setRoundtableSession(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            discussions: [...prev.discussions, newDiscussion]
           };
-          
-          setRoundtableSession(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              discussions: [...prev.discussions, newDiscussion]
-            };
-          });
-          
-          setFocusedAgentId(agent.id);
-          pushLog('SYSTEM', 'INFO', `${agent.name} speaking...`);
-          console.log(`[v0] ${agent.name} message added to discussion`);
-          
-        } catch (e: any) {
-          console.error(`[v0] ${agent.name} discussion error:`, e);
-          pushLog('SYSTEM', 'ERROR', `${agent.name} discussion error: ${e.message}`);
-        }
+        });
+        
+        setFocusedAgentId(nextAgent.id);
+        pushLog('SYSTEM', 'INFO', `${nextAgent.name}${addressedAgent ? ` → ${addressedAgent.name}` : ''}`);
+        console.log(`[v0] Message added${addressedAgent ? ` (addressing ${addressedAgent.name})` : ''}`);
+        
+      } catch (e: any) {
+        console.error(`[v0] Discussion exchange error:`, e);
+        pushLog('SYSTEM', 'ERROR', `Exchange error: ${e.message}`);
       }
-      console.log(`[v0] ROUND ${round + 1} COMPLETE`);
     }
     
     console.log('[v0] DISCUSSION PHASE COMPLETE');
-    // Move to summary phase
     console.log('[v0] Waiting 1 second before generating summary...');
     setTimeout(() => generateSummary(), 1000);
   };
