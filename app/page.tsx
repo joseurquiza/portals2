@@ -165,12 +165,17 @@ const App: React.FC = () => {
   
   const [roundtableSession, setRoundtableSession] = useState<RoundtableSession | null>(null);
   const [showRoundtableInput, setShowRoundtableInput] = useState(false);
+  const [roundtableDbId, setRoundtableDbId] = useState<string | null>(null);
+  const [isDiscussionRunning, setIsDiscussionRunning] = useState(false);
+  const [shouldStopDiscussion, setShouldStopDiscussion] = useState(false);
   
   const [agentPersonalities, setAgentPersonalities] = useState<AgentPersonality[]>(
     AGENTS.map(agent => ({ agentId: agent.id, presetId: 'default', customTraits: '' }))
   );
   const [showPersonalityEditor, setShowPersonalityEditor] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [personResearchName, setPersonResearchName] = useState('');
+  const [researchingPerson, setResearchingPerson] = useState(false);
   
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
@@ -628,104 +633,208 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
     setFocusedAgentId(null);
     
-    // Move to discussion phase
-    console.log('[v0] Waiting 2 seconds before starting discussion...');
-    setTimeout(() => startDiscussion(), 2000);
+    // Save research to database
+    if (roundtableDbId && supabase) {
+      console.log('[v0] Saving research to database...');
+      try {
+        for (const research of roundtableSession.research) {
+          const agent = AGENTS.find(a => a.id === research.agentId);
+          await supabase.from('roundtable_research').insert({
+            session_id: roundtableDbId,
+            agent_id: research.agentId,
+            agent_name: agent?.name || research.agentId,
+            findings: research.findings,
+            status: research.status
+          });
+        }
+        
+        // Update session status
+        await supabase.from('roundtable_sessions').update({
+          status: 'researching'
+        }).eq('id', roundtableDbId);
+        
+        console.log('[v0] Research saved to database');
+        pushLog('SYSTEM', 'SUCCESS', 'Research saved to database');
+      } catch (e: any) {
+        console.error('[v0] Failed to save research:', e);
+        pushLog('SYSTEM', 'ERROR', `Failed to save research: ${e.message}`);
+      }
+    }
+    
+    setRoundtableSession(prev => prev ? { ...prev, status: 'researching' } : null);
+    pushLog('SYSTEM', 'INFO', 'Research complete. Click "Start Discussion" to begin board conversation.');
   };
 
   const startDiscussion = async () => {
-    if (!roundtableSession) return;
+    if (!roundtableSession || isDiscussionRunning) return;
     
-    console.log('[v0] DISCUSSION PHASE STARTED');
+    console.log('[v0] DISCUSSION PHASE STARTED - Interactive Agent Mode');
+    setIsDiscussionRunning(true);
+    setShouldStopDiscussion(false);
     setRoundtableSession(prev => prev ? { ...prev, status: 'discussing' } : null);
-    pushLog('SYSTEM', 'INFO', 'Agents entering discussion phase...');
+    pushLog('SYSTEM', 'INFO', 'Board members entering discussion...');
     setStatus(ConnectionStatus.CONNECTED);
+    
+    // Update database status
+    if (roundtableDbId && supabase) {
+      await supabase.from('roundtable_sessions').update({
+        status: 'discussing'
+      }).eq('id', roundtableDbId);
+    }
     
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
-    // Simulate discussion rounds
-    const discussionRounds = 3; // Each agent speaks once per round
-    console.log(`[v0] Discussion will have ${discussionRounds} rounds with ${AGENTS.length} agents`);
+    // Natural conversation flow - agents respond to each other
+    const totalExchanges = 12; // Multiple back-and-forth exchanges
+    console.log(`[v0] Starting ${totalExchanges} conversational exchanges`);
     
-    for (let round = 0; round < discussionRounds; round++) {
-      console.log(`[v0] ROUND ${round + 1}/${discussionRounds} STARTING`);
+    for (let exchange = 0; exchange < totalExchanges; exchange++) {
+      // Check if user requested stop
+      if (shouldStopDiscussion) {
+        console.log('[v0] Discussion stopped by user');
+        pushLog('SYSTEM', 'INFO', 'Discussion stopped');
+        break;
+      }
       
-      for (let i = 0; i < AGENTS.length; i++) {
-        const agent = AGENTS[i];
-        console.log(`[v0] [Round ${round + 1}, Speaker ${i + 1}/${AGENTS.length}] Waiting 2s for ${agent.name} to speak...`);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Pause between speakers
+      console.log(`[v0] EXCHANGE ${exchange + 1}/${totalExchanges}`);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      try {
+        // Determine which agent should speak next based on context
+        const recentSpeakers = roundtableSession.discussions
+          .slice(-3)
+          .map(d => d.fromAgentId);
         
-        try {
-          const agentResearch = roundtableSession.research.find(r => r.agentId === agent.id);
-          const allResearch = roundtableSession.research
-            .map(r => `${AGENTS.find(a => a.id === r.agentId)?.name}: ${r.findings}`)
-            .join('\n\n');
-          
-          const recentDiscussions = roundtableSession.discussions
-            .slice(-5)
-            .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
-            .join('\n');
-          
-          console.log(`[v0] ${agent.name} - Preparing discussion prompt...`);
-          console.log(`[v0] ${agent.name} - Context: ${recentDiscussions ? 'Has recent discussion' : 'Starting fresh'}`);
-          
-          const prompt = `You are ${agent.name} in a roundtable discussion about: "${roundtableSession.topic}"
+        // Find agent who hasn't spoken recently or who was addressed
+        const lastMessage = roundtableSession.discussions[roundtableSession.discussions.length - 1];
+        let nextAgent: AgentConfig | undefined;
+        
+        // Check if previous message addressed someone
+        if (lastMessage) {
+          const addressedAgentName = AGENTS.find(a => 
+            lastMessage.message.toLowerCase().includes(a.name.toLowerCase()) && 
+            a.id !== lastMessage.fromAgentId
+          );
+          if (addressedAgentName && !recentSpeakers.slice(-2).includes(addressedAgentName.id)) {
+            nextAgent = addressedAgentName;
+            console.log(`[v0] ${addressedAgentName.name} was addressed, will respond`);
+          }
+        }
+        
+        // Otherwise, pick agent who hasn't spoken in last 2 turns
+        if (!nextAgent) {
+          nextAgent = AGENTS.find(a => !recentSpeakers.slice(-2).includes(a.id)) || AGENTS[exchange % AGENTS.length];
+        }
+        
+        const agentResearch = roundtableSession.research.find(r => r.agentId === nextAgent.id);
+        const allResearch = roundtableSession.research
+          .map(r => `${AGENTS.find(a => a.id === r.agentId)?.name}: ${r.findings}`)
+          .join('\n\n');
+        
+        const recentDiscussions = roundtableSession.discussions
+          .slice(-4)
+          .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
+          .join('\n');
+        
+        console.log(`[v0] ${nextAgent.name} preparing to contribute...`);
+        
+        const prompt = `You are ${nextAgent.name}, ${nextAgent.description}
 
-Your research: ${agentResearch?.findings}
+BOARD DISCUSSION: "${roundtableSession.topic}"
 
-All research findings:
+YOUR RESEARCH:
+${agentResearch?.findings}
+
+ALL BOARD MEMBER RESEARCH:
 ${allResearch}
 
-Recent discussion:
-${recentDiscussions || 'Discussion just starting'}
+RECENT DISCUSSION:
+${recentDiscussions || 'Discussion starting - you can open with your perspective'}
 
-This is discussion round ${round + 1} of ${discussionRounds}. ${
-  round === 0 ? 'Share your perspective and react to others\' research.' :
-  round === 1 ? 'Build on what others said and add deeper insights.' :
-  'Synthesize the discussion and offer final thoughts.'
-}
+INSTRUCTIONS:
+- Respond naturally as a board member would
+- You may address other board members by name if asking questions or building on their points
+- Bring your unique expertise (${nextAgent.description})
+- Keep it concise (1-2 sentences)
+- If addressed directly, respond to that person's point
+- You can ask questions, challenge assumptions, or add new insights
+- Be conversational but professional
 
-Respond in 1-2 sentences. Be conversational and reference others' points.`;
+Your response:`;
 
-          console.log(`[v0] ${agent.name} - Sending discussion prompt to Gemini...`);
-          const result = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt
-          });
-          const message = result.text || 'No response available';
-          console.log(`[v0] ${agent.name} said: "${message}"`);
-          
-          const newDiscussion: RoundtableDiscussion = {
-            fromAgentId: agent.id,
-            toAgentId: null,
-            message,
-            timestamp: Date.now()
+        console.log(`[v0] ${nextAgent.name} - Sending to Gemini...`);
+        const result = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: prompt
+        });
+        const message = result.text || 'No response available';
+        console.log(`[v0] ${nextAgent.name}: "${message}"`);
+        
+        // Detect if this message addresses another agent
+        const addressedAgent = AGENTS.find(a => 
+          a.id !== nextAgent.id && 
+          message.toLowerCase().includes(a.name.toLowerCase())
+        );
+        
+        const newDiscussion: RoundtableDiscussion = {
+          fromAgentId: nextAgent.id,
+          toAgentId: addressedAgent?.id || null,
+          message,
+          timestamp: Date.now()
+        };
+        
+        setRoundtableSession(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            discussions: [...prev.discussions, newDiscussion]
           };
-          
-          setRoundtableSession(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              discussions: [...prev.discussions, newDiscussion]
-            };
-          });
-          
-          setFocusedAgentId(agent.id);
-          pushLog('SYSTEM', 'INFO', `${agent.name} speaking...`);
-          console.log(`[v0] ${agent.name} message added to discussion`);
-          
-        } catch (e: any) {
-          console.error(`[v0] ${agent.name} discussion error:`, e);
-          pushLog('SYSTEM', 'ERROR', `${agent.name} discussion error: ${e.message}`);
+        });
+        
+        // Save message to database
+        if (roundtableDbId && supabase) {
+          try {
+            await supabase.from('roundtable_discussions').insert({
+              session_id: roundtableDbId,
+              from_agent_id: nextAgent.id,
+              from_agent_name: nextAgent.name,
+              to_agent_id: addressedAgent?.id || null,
+              to_agent_name: addressedAgent?.name || null,
+              message: message
+            });
+            console.log(`[v0] Message saved to database`);
+          } catch (e: any) {
+            console.error(`[v0] Failed to save message:`, e);
+          }
         }
+        
+        setFocusedAgentId(nextAgent.id);
+        pushLog('SYSTEM', 'INFO', `${nextAgent.name}${addressedAgent ? ` → ${addressedAgent.name}` : ''}`);
+        console.log(`[v0] Message added${addressedAgent ? ` (addressing ${addressedAgent.name})` : ''}`);
+        
+      } catch (e: any) {
+        console.error(`[v0] Discussion exchange error:`, e);
+        pushLog('SYSTEM', 'ERROR', `Exchange error: ${e.message}`);
       }
-      console.log(`[v0] ROUND ${round + 1} COMPLETE`);
     }
     
     console.log('[v0] DISCUSSION PHASE COMPLETE');
-    // Move to summary phase
-    console.log('[v0] Waiting 1 second before generating summary...');
-    setTimeout(() => generateSummary(), 1000);
+    setIsDiscussionRunning(false);
+    
+    // Update database status
+    if (roundtableDbId && supabase) {
+      const finalStatus = shouldStopDiscussion ? 'stopped' : 'complete';
+      await supabase.from('roundtable_sessions').update({
+        status: finalStatus,
+        end_time: new Date().toISOString()
+      }).eq('id', roundtableDbId);
+      console.log(`[v0] Session marked as ${finalStatus} in database`);
+    }
+    
+    if (!shouldStopDiscussion) {
+      console.log('[v0] Waiting 1 second before generating summary...');
+      setTimeout(() => generateSummary(), 1000);
+    }
   };
 
   const generateSummary = async () => {
@@ -777,6 +886,16 @@ Format in markdown with headers (##) and bullet points.`;
         return { ...prev, summary, status: 'complete' };
       });
       
+      // Save summary to database
+      if (roundtableDbId && supabase) {
+        await supabase.from('roundtable_sessions').update({
+          summary,
+          status: 'complete',
+          end_time: new Date().toISOString()
+        }).eq('id', roundtableDbId);
+        console.log('[v0] Summary saved to database');
+      }
+      
       console.log('[v0] SUMMARY PHASE COMPLETE');
       console.log('[v0] ROUNDTABLE SESSION COMPLETE');
       pushLog('SYSTEM', 'SUCCESS', 'Roundtable complete!');
@@ -785,6 +904,79 @@ Format in markdown with headers (##) and bullet points.`;
     } catch (e: any) {
       console.error('[v0] Summary generation failed:', e);
       pushLog('SYSTEM', 'ERROR', `Summary generation failed: ${e.message}`);
+    }
+  };
+
+  const researchPersonAsAgent = async (agentId: string) => {
+    if (!personResearchName.trim() || researchingPerson) return;
+    
+    const agent = AGENTS.find(a => a.id === agentId);
+    if (!agent) return;
+    
+    setResearchingPerson(true);
+    console.log(`[v0] Researching ${personResearchName} as board member for ${agent.name} role`);
+    pushLog('SYSTEM', 'INFO', `Researching ${personResearchName}'s board member profile...`);
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+      
+      const prompt = `Research ${personResearchName} to understand how they would act as a ${agent.name} (${agent.description}) on a corporate board of directors.
+
+Conduct DEEP research on:
+1. Their actual decision-making patterns and philosophy
+2. How they approach problems in their domain (${agent.description})
+3. Their communication style and rhetoric
+4. Their known positions, beliefs, and perspectives
+5. How they interact with others in professional settings
+6. Their track record of decisions and outcomes
+7. Their strengths and potential blind spots
+8. Specific quirks, habits, or signature approaches
+
+For example, if researching Peter Thiel:
+- His contrarian thinking and "zero to one" philosophy
+- Focus on monopolies and competition avoidance
+- Long-term thinking and patient capital approach
+- Libertarian leanings and skepticism of regulation
+- Direct, sometimes provocative communication style
+- Emphasis on technology and disruption
+- Known for asking unconventional questions
+
+Generate a detailed personality profile (200-300 words) that captures:
+- HOW they would contribute in their role as ${agent.name}
+- WHAT questions they would ask
+- HOW they would challenge or support other board members
+- WHAT their priorities and concerns would be
+- Their unique perspective and decision-making framework
+
+Make it specific and actionable for AI agent behavior. Include actual quotes or known positions when relevant.`;
+
+      console.log(`[v0] Sending research request to Gemini 3...`);
+      const result = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt
+      });
+      
+      const personalityProfile = result.text || 'Research unavailable';
+      console.log(`[v0] Research complete for ${personResearchName}`);
+      console.log(`[v0] Profile length: ${personalityProfile.length} chars`);
+      
+      // Update agent personality with researched profile
+      setAgentPersonalities(prev => 
+        prev.map(p => 
+          p.agentId === agentId 
+            ? { ...p, customTraits: personalityProfile, presetId: 'custom' }
+            : p
+        )
+      );
+      
+      pushLog('SYSTEM', 'SUCCESS', `${personResearchName} profile applied to ${agent.name}`);
+      setPersonResearchName('');
+      
+    } catch (e: any) {
+      console.error(`[v0] Research failed:`, e);
+      pushLog('SYSTEM', 'ERROR', `Research failed: ${e.message}`);
+    } finally {
+      setResearchingPerson(false);
     }
   };
 
@@ -798,6 +990,25 @@ Format in markdown with headers (##) and bullet points.`;
     setShowRoundtableInput(false);
     pushLog('SYSTEM', 'INFO', `Starting roundtable on: ${topic}`);
     setStatus(ConnectionStatus.CONNECTING);
+    
+    // Create database session
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('roundtable_sessions').insert({
+          topic,
+          status: 'researching'
+        }).select().single();
+        
+        if (error) throw error;
+        if (data) {
+          setRoundtableDbId(data.id);
+          console.log('[v0] Database session created:', data.id);
+        }
+      } catch (e: any) {
+        console.error('[v0] Failed to create database session:', e);
+        pushLog('SYSTEM', 'ERROR', `Failed to create database session: ${e.message}`);
+      }
+    }
     
     // Initialize roundtable session
     const session: RoundtableSession = {
@@ -1096,6 +1307,35 @@ Format in markdown with headers (##) and bullet points.`;
                     <p className="text-xs text-white/50 mb-3 h-8">
                       {preset?.description}
                     </p>
+                    
+                    {/* Research Real Person */}
+                    {editingAgentId === agent.id && (
+                      <div className="mb-3 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                        <label className="text-xs text-purple-300 font-semibold block mb-2">
+                          Research Real Person
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={personResearchName}
+                            onChange={(e) => setPersonResearchName(e.target.value)}
+                            placeholder="e.g., Peter Thiel, Elon Musk..."
+                            className="flex-1 bg-white/10 border border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500 transition"
+                            disabled={researchingPerson}
+                          />
+                          <button
+                            onClick={() => researchPersonAsAgent(agent.id)}
+                            disabled={!personResearchName.trim() || researchingPerson}
+                            className="bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 font-semibold px-3 py-1.5 rounded text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {researchingPerson ? 'Researching...' : 'Research'}
+                          </button>
+                        </div>
+                        <p className="text-xs text-white/40 mt-1">
+                          AI will deeply research this person's decision-making style and board behavior
+                        </p>
+                      </div>
+                    )}
 
                     {isEditing ? (
                       <div className="space-y-2">
@@ -1630,6 +1870,20 @@ Format in markdown with headers (##) and bullet points.`;
                   </span>
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Start Discussion Button */}
+                  {roundtableSession.status === 'researching' && 
+                   roundtableSession.research.every(r => r.status === 'complete') && 
+                   !isDiscussionRunning && (
+                    <div className="col-span-full flex justify-center mt-4">
+                      <button
+                        onClick={() => startDiscussion()}
+                        className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold px-8 py-3 rounded-xl transition-all transform hover:scale-105 shadow-lg"
+                      >
+                        Start Board Discussion
+                      </button>
+                    </div>
+                  )}
+                  
                   {roundtableSession.research.map((research) => {
                     const agent = AGENTS.find(a => a.id === research.agentId);
                     const isActivelyResearching = focusedAgentId === agent?.id && research.status === 'researching';
@@ -1697,10 +1951,23 @@ Format in markdown with headers (##) and bullet points.`;
               {/* Discussion Phase */}
               {roundtableSession.discussions.length > 0 && (
                 <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6">
-                  <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    <span className="text-2xl">💬</span>
-                    Discussion
-                  </h2>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-bold flex items-center gap-2">
+                      <span className="text-2xl">💬</span>
+                      Discussion
+                      <span className="text-xs text-white/40 ml-2">
+                        {roundtableSession.discussions.length} exchanges
+                      </span>
+                    </h2>
+                    {isDiscussionRunning && (
+                      <button
+                        onClick={() => setShouldStopDiscussion(true)}
+                        className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 font-semibold px-4 py-2 rounded-lg transition text-sm"
+                      >
+                        Stop Discussion
+                      </button>
+                    )}
+                  </div>
                   <div className="space-y-3">
                     {roundtableSession.discussions.map((discussion, idx) => {
                       const agent = AGENTS.find(a => a.id === discussion.fromAgentId);
