@@ -65,6 +65,10 @@ To enable session persistence, configure Supabase:
 - **Live Voice Chat**: Real-time audio conversations with AI agents
 - **Visual Portals**: Animated liquid portal visualizations for each agent
 - **Collaborative Clusters**: Agents can summon each other into conversations
+- **Customizable Personalities**: Assign thinking styles (Peter Thiel, Elon Musk, Math Professor, etc.) to each agent
+- **Roundtable Discussions**: All agents research a topic, discuss findings, and provide summaries
+- **Company Knowledge Base**: Upload PDFs, documents, spreadsheets, and images that agents can search and reference
+- **Agentic Search**: Agents intelligently search uploaded documents during conversations
 - **Transcription**: Live transcription of all conversations
 - **Phantom Wallet Integration**: Connect your Solana wallet
 - **Session Persistence**: Optional Supabase integration for saving conversations

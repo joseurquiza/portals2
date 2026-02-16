@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, Type, FunctionDeclaration } from '@google/genai';
-import { ConnectionStatus, TranscriptionItem, AgentConfig, RoundtableSession, RoundtableResearch, RoundtableDiscussion, PersonalityPreset, AgentPersonality } from '../types';
+import { ConnectionStatus, TranscriptionItem, AgentConfig, RoundtableSession, RoundtableResearch, RoundtableDiscussion, PersonalityPreset, AgentPersonality, KnowledgeDocument } from '../types';
 import { decode, encode, decodeAudioData } from '../utils/audioUtils';
 import { supabase as initialSupabase } from '../supabaseClient';
 import LiquidPortal from '../components/LiquidPortal';
@@ -136,6 +136,25 @@ const summonAgentDeclaration: FunctionDeclaration = {
   },
 };
 
+const searchKnowledgeDeclaration: FunctionDeclaration = {
+  name: 'searchKnowledge',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Search the company knowledge base for relevant documents, data, and information. Use this to find context from uploaded PDFs, documents, spreadsheets, and images.',
+    properties: {
+      query: {
+        type: Type.STRING,
+        description: 'The search query to find relevant documents. Use keywords and phrases from the conversation context.',
+      },
+      limit: {
+        type: Type.NUMBER,
+        description: 'Maximum number of results to return (default: 3)',
+      }
+    },
+    required: ['query'],
+  },
+};
+
 const App: React.FC = () => {
   const [config, setConfig] = useState({
     supabaseUrl: typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_URL') || '' : '',
@@ -158,6 +177,10 @@ const App: React.FC = () => {
   );
   const [showPersonalityEditor, setShowPersonalityEditor] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  
+  const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDocument[]>([]);
   
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
   const [intensity, setIntensity] = useState(0);
@@ -371,7 +394,7 @@ const App: React.FC = () => {
   const personalityPreset = PERSONALITY_PRESETS.find(p => p.id === personality?.presetId);
   const personalityTraits = personality?.customTraits || personalityPreset?.traits || '';
   
-  const systemInstruction = `${agent.instruction}${personalityTraits ? `\n\nPERSONALITY: ${personalityTraits}` : ''}\n\nNEURAL ETIQUETTE:\n1. You hear all room audio including peers.\n2. If another agent is speaking, YOU MUST STAY SILENT.\n3. If a peer is addressed by name, DO NOT INTERRUPT.\n4. Only one agent should talk to the user at a time. The Oracle is the lead. Yield the floor immediately if anyone else starts speaking.`;
+  const systemInstruction = `${agent.instruction}${personalityTraits ? `\n\nPERSONALITY: ${personalityTraits}` : ''}\n\nTOOLS AVAILABLE:\n- Use searchKnowledge(query) to search the company knowledge base for relevant documents, data, and context. The knowledge base contains uploaded PDFs, documents, spreadsheets, and images. Always search when you need specific company information, technical details, or data that might be in uploaded documents.\n\nNEURAL ETIQUETTE:\n1. You hear all room audio including peers.\n2. If another agent is speaking, YOU MUST STAY SILENT.\n3. If a peer is addressed by name, DO NOT INTERRUPT.\n4. Only one agent should talk to the user at a time. The Oracle is the lead. Yield the floor immediately if anyone else starts speaking.`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -464,18 +487,51 @@ const App: React.FC = () => {
                     }));
                   }
                 }
+                
+                if (fc.name === 'searchKnowledge') {
+                  const { query, limit = 3 } = fc.args as any;
+                  pushLog('SYSTEM', 'INFO', `${agent.name} searching knowledge base: "${query}"`);
+                  
+                  // Call knowledge search API
+                  fetch('/api/knowledge/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, limit })
+                  })
+                  .then(res => res.json())
+                  .then(data => {
+                    const results = data.results || [];
+                    const responseText = results.length > 0
+                      ? `Found ${results.length} relevant document(s):\n\n${results.map((r: any, i: number) => 
+                          `${i + 1}. ${r.filename} (${r.file_type})\nRelevant excerpt: ${r.extracted_text?.substring(0, 300)}...`
+                        ).join('\n\n')}`
+                      : `No relevant documents found for query: "${query}"`;
+                    
+                    sessionPromise.then(s => s.sendToolResponse({
+                      functionResponses: [{ id: fc.id, name: fc.name, response: { result: responseText } }]
+                    }));
+                    
+                    pushLog('SYSTEM', 'SUCCESS', `Knowledge search returned ${results.length} results`);
+                  })
+                  .catch(err => {
+                    console.error('[v0] Knowledge search error:', err);
+                    sessionPromise.then(s => s.sendToolResponse({
+                      functionResponses: [{ id: fc.id, name: fc.name, response: { result: 'Knowledge search failed. Please try again.' } }]
+                    }));
+                  });
+                }
               }
             }
           }
         },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice } } },
-          systemInstruction: systemInstruction,
-          tools: [{ functionDeclarations: [summonAgentDeclaration] }],
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-        }
+  config: {
+  responseModalities: [Modality.AUDIO],
+  speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice } } },
+  systemInstruction: systemInstruction,
+  tools: [{ functionDeclarations: [summonAgentDeclaration, searchKnowledgeDeclaration] }],
+  inputAudioTranscription: {},
+  outputAudioTranscription: {},
+  }
       });
       sessionsRef.current.set(agent.id, { agentId: agent.id, promise: sessionPromise });
     } catch (e) { pushLog('NETWORK', 'ERROR', `Agent Manifest Error: ${agent.name}`, e); }
@@ -862,6 +918,12 @@ Format in markdown with headers (##) and bullet points.`;
                 Customize Personalities
               </button>
               <button 
+                onClick={() => setShowKnowledgeBase(true)}
+                className="text-sm text-white/60 hover:text-white/90 transition underline"
+              >
+                Knowledge Base
+              </button>
+              <button 
                 onClick={() => setShowConfig(true)}
                 className="text-sm text-white/40 hover:text-white/80 transition underline"
               >
@@ -1028,6 +1090,164 @@ Format in markdown with headers (##) and bullet points.`;
                 className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold py-2 rounded-lg transition"
               >
                 Save & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Knowledge Base Modal */}
+      {showKnowledgeBase && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-4xl w-full shadow-2xl my-8">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold font-outfit">Company Knowledge Base</h2>
+                <p className="text-sm text-white/60 mt-1">
+                  Upload documents, PDFs, spreadsheets, and images. Agents can search and reference them during conversations.
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowKnowledgeBase(false)}
+                className="text-white/60 hover:text-white transition text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Upload Area */}
+            <div className="border-2 border-dashed border-white/20 rounded-xl p-8 mb-6 hover:border-cyan-500/50 transition">
+              <input
+                type="file"
+                id="knowledge-upload"
+                multiple
+                accept=".pdf,.txt,.md,.doc,.docx,.csv,.xlsx,.png,.jpg,.jpeg"
+                className="hidden"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (files.length === 0) return;
+                  
+                  setUploadingFiles(true);
+                  pushLog('SYSTEM', 'INFO', `Uploading ${files.length} file(s)...`);
+                  
+                  for (const file of files) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    try {
+                      const res = await fetch('/api/knowledge/upload', {
+                        method: 'POST',
+                        body: formData
+                      });
+                      
+                      if (res.ok) {
+                        const data = await res.json();
+                        pushLog('SYSTEM', 'SUCCESS', `Uploaded: ${file.name}`);
+                        setKnowledgeDocs(prev => [data.document, ...prev]);
+                      } else {
+                        pushLog('SYSTEM', 'ERROR', `Failed to upload: ${file.name}`);
+                      }
+                    } catch (err) {
+                      console.error('[v0] Upload error:', err);
+                      pushLog('SYSTEM', 'ERROR', `Upload error: ${file.name}`);
+                    }
+                  }
+                  
+                  setUploadingFiles(false);
+                  e.target.value = '';
+                }}
+              />
+              <label 
+                htmlFor="knowledge-upload"
+                className="flex flex-col items-center cursor-pointer"
+              >
+                <div className="text-5xl mb-4">📁</div>
+                <div className="text-lg font-semibold mb-2">
+                  {uploadingFiles ? 'Uploading...' : 'Click to Upload Documents'}
+                </div>
+                <div className="text-sm text-white/50">
+                  Supports: PDF, Text, Word, Excel, Images (PNG, JPG)
+                </div>
+              </label>
+            </div>
+
+            {/* Document List */}
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {knowledgeDocs.length === 0 && !uploadingFiles && (
+                <div className="text-center text-white/40 py-8">
+                  No documents uploaded yet. Upload files to give your agents context.
+                </div>
+              )}
+              
+              {knowledgeDocs.map((doc) => (
+                <div 
+                  key={doc.id}
+                  className="bg-white/5 border border-white/10 rounded-lg p-4 hover:bg-white/10 transition flex items-center gap-4"
+                >
+                  <div className="text-3xl">
+                    {doc.file_type === 'application/pdf' && '📄'}
+                    {doc.file_type.includes('text') && '📝'}
+                    {doc.file_type.includes('spreadsheet') && '📊'}
+                    {doc.file_type.includes('image') && '🖼️'}
+                    {!['application/pdf', 'text', 'spreadsheet', 'image'].some(t => doc.file_type.includes(t)) && '📎'}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-semibold">{doc.filename}</div>
+                    <div className="text-xs text-white/50">
+                      {(doc.file_size / 1024).toFixed(1)} KB • Uploaded {new Date(doc.upload_date).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (confirm(`Delete ${doc.filename}?`)) {
+                        // Delete from database
+                        const { createClient } = await import('@supabase/supabase-js');
+                        const supabase = createClient(
+                          config.supabaseUrl,
+                          config.supabaseKey
+                        );
+                        
+                        await supabase.from('knowledge_documents').delete().eq('id', doc.id);
+                        setKnowledgeDocs(prev => prev.filter(d => d.id !== doc.id));
+                        pushLog('SYSTEM', 'INFO', `Deleted: ${doc.filename}`);
+                      }
+                    }}
+                    className="text-red-400 hover:text-red-300 text-sm"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={async () => {
+                  // Load existing documents
+                  if (config.supabaseUrl && config.supabaseKey) {
+                    const { createClient } = await import('@supabase/supabase-js');
+                    const supabase = createClient(
+                      config.supabaseUrl,
+                      config.supabaseKey
+                    );
+                    
+                    const { data } = await supabase
+                      .from('knowledge_documents')
+                      .select('*')
+                      .order('upload_date', { ascending: false });
+                    
+                    if (data) setKnowledgeDocs(data);
+                  }
+                }}
+                className="px-6 bg-white/5 hover:bg-white/10 border border-white/20 rounded-lg py-2 transition text-sm"
+              >
+                Refresh List
+              </button>
+              <button
+                onClick={() => setShowKnowledgeBase(false)}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2 rounded-lg transition"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -74,3 +74,16 @@ export interface AgentPersonality {
   presetId: string;
   customTraits?: string;
 }
+
+export interface KnowledgeDocument {
+  id: string;
+  filename: string;
+  file_type: string;
+  file_size: number;
+  storage_url: string;
+  extracted_text: string | null;
+  metadata: Record<string, any>;
+  upload_date: string;
+  last_accessed: string | null;
+  access_count: number;
+}
