@@ -859,8 +859,8 @@ Format in markdown with headers (##) and bullet points.`;
   }, [status]);
 
   return (
-  <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
-  {/* Wallet & Debug Header */}
+    <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
+      {/* Wallet & Debug Header */}
       <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-6 z-40">
         <button 
           onClick={handleWalletAction}
