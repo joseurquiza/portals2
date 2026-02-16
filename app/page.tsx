@@ -1201,10 +1201,13 @@ Format in markdown with headers (##) and bullet points.`;
                     return;
                   }
                   
+                  const { createClient } = await import('@supabase/supabase-js');
+                  const supabase = createClient(supabaseUrl, supabaseKey);
+                  
                   setUploadingFiles(true);
                   setUploadProgress([]);
                   pushLog('SYSTEM', 'INFO', `Uploading ${files.length} file(s)...`);
-                  console.log('[v0] Starting upload of', files.length, 'files');
+                  console.log('[v0] Starting direct upload of', files.length, 'files');
                   
                   for (let i = 0; i < files.length; i++) {
                     const file = files[i];
@@ -1231,69 +1234,84 @@ Format in markdown with headers (##) and bullet points.`;
                     }
 
                     setUploadProgress(prev => prev.map(p => 
-                      p.filename === file.name ? {...p, status: 'uploading', progress: 30} : p
+                      p.filename === file.name ? {...p, status: 'uploading', progress: 20} : p
                     ));
 
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    formData.append('supabaseUrl', supabaseUrl);
-                    formData.append('supabaseKey', supabaseKey);
-                    
-                    console.log('[v0] Sending upload request for:', file.name);
-                    
                     try {
-                      const res = await fetch('/api/knowledge/upload', {
-                        method: 'POST',
-                        body: formData
-                      });
+                      // Upload directly to Supabase Storage (client-side)
+                      const fileExt = file.name.split('.').pop();
+                      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+                      const filePath = `knowledge/${fileName}`;
+
+                      console.log('[v0] Uploading to Supabase storage:', filePath);
                       
-                      console.log('[v0] Upload response status:', res.status, res.statusText);
+                      setUploadProgress(prev => prev.map(p => 
+                        p.filename === file.name ? {...p, progress: 40} : p
+                      ));
+                      
+                      const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('knowledge-base')
+                        .upload(filePath, file);
+
+                      if (uploadError) {
+                        throw new Error(`Storage upload failed: ${uploadError.message}`);
+                      }
+
+                      console.log('[v0] File uploaded to storage:', uploadData.path);
                       
                       setUploadProgress(prev => prev.map(p => 
                         p.filename === file.name ? {...p, progress: 60} : p
                       ));
-                      
-                      if (res.ok) {
-                        const data = await res.json();
-                        console.log('[v0] Upload successful:', data);
-                        pushLog('SYSTEM', 'SUCCESS', `Uploaded: ${file.name}`);
-                        
-                        setUploadProgress(prev => prev.map(p => 
-                          p.filename === file.name ? {...p, status: 'complete', progress: 100} : p
-                        ));
-                        
-                        // Refresh the document list
-                        console.log('[v0] Refreshing document list...');
-                        if (data.results && data.results.length > 0) {
-                          const { createClient } = await import('@supabase/supabase-js');
-                          const supabase = createClient(supabaseUrl, supabaseKey);
-                          const { data: docs } = await supabase
-                            .from('knowledge_documents')
-                            .select('*')
-                            .order('upload_date', { ascending: false })
-                            .limit(1);
-                          if (docs && docs[0]) {
-                            console.log('[v0] Added document to list:', docs[0].filename);
-                            setKnowledgeDocs(prev => [docs[0], ...prev]);
-                          }
-                        }
+
+                      // Get public URL
+                      const { data: { publicUrl } } = supabase.storage
+                        .from('knowledge-base')
+                        .getPublicUrl(filePath);
+
+                      // Extract text from file (basic client-side processing)
+                      let extractedText = '';
+                      if (file.type.includes('text') || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
+                        extractedText = await file.text();
                       } else {
-                        // Try to parse JSON error, fallback to text
-                        let errorMessage = 'Unknown error';
-                        try {
-                          const error = await res.json();
-                          errorMessage = error.error || error.message || 'Unknown error';
-                          console.log('[v0] Upload error response:', error);
-                        } catch {
-                          const text = await res.text();
-                          errorMessage = text.substring(0, 100);
-                          console.log('[v0] Upload error text:', text);
-                        }
-                        pushLog('SYSTEM', 'ERROR', `Failed: ${file.name} - ${errorMessage}`);
-                        setUploadProgress(prev => prev.map(p => 
-                          p.filename === file.name ? {...p, status: 'error', progress: 100} : p
-                        ));
+                        extractedText = `${file.name} - File uploaded. Search by filename.`;
                       }
+
+                      setUploadProgress(prev => prev.map(p => 
+                        p.filename === file.name ? {...p, progress: 80} : p
+                      ));
+
+                      // Save metadata to database
+                      console.log('[v0] Saving document metadata to database...');
+                      const { data: docData, error: dbError } = await supabase
+                        .from('knowledge_documents')
+                        .insert({
+                          filename: file.name,
+                          file_type: file.type,
+                          file_size: file.size,
+                          storage_url: publicUrl,
+                          extracted_text: extractedText,
+                          metadata: {
+                            original_name: file.name,
+                            upload_source: 'client'
+                          },
+                        })
+                        .select()
+                        .single();
+
+                      if (dbError) {
+                        throw new Error(`Database insert failed: ${dbError.message}`);
+                      }
+
+                      console.log('[v0] Document saved to database:', docData.id);
+                      pushLog('SYSTEM', 'SUCCESS', `Uploaded: ${file.name}`);
+                      
+                      setUploadProgress(prev => prev.map(p => 
+                        p.filename === file.name ? {...p, status: 'complete', progress: 100} : p
+                      ));
+                      
+                      // Add to document list
+                      setKnowledgeDocs(prev => [docData, ...prev]);
+                      
                     } catch (err: any) {
                       console.error('[v0] Upload exception:', err);
                       pushLog('SYSTEM', 'ERROR', `Upload error: ${file.name} - ${err.message}`);
@@ -1305,7 +1323,7 @@ Format in markdown with headers (##) and bullet points.`;
                   
                   console.log('[v0] Upload process complete');
                   setUploadingFiles(false);
-                  setTimeout(() => setUploadProgress([]), 3000); // Clear after 3 seconds
+                  setTimeout(() => setUploadProgress([]), 3000);
                   e.target.value = '';
                 }}
               />
