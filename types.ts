@@ -61,3 +61,16 @@ export interface RoundtableSession {
   status: 'setup' | 'researching' | 'discussing' | 'summarizing' | 'complete';
   startTime: number;
 }
+
+export interface PersonalityPreset {
+  id: string;
+  name: string;
+  description: string;
+  traits: string;
+}
+
+export interface AgentPersonality {
+  agentId: string;
+  presetId: string;
+  customTraits?: string;
+}

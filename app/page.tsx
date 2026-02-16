@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, Type, FunctionDeclaration } from '@google/genai';
-import { ConnectionStatus, TranscriptionItem, AgentConfig, RoundtableSession, RoundtableResearch, RoundtableDiscussion } from '../types';
+import { ConnectionStatus, TranscriptionItem, AgentConfig, RoundtableSession, RoundtableResearch, RoundtableDiscussion, PersonalityPreset, AgentPersonality } from '../types';
 import { decode, encode, decodeAudioData } from '../utils/audioUtils';
 import { supabase as initialSupabase } from '../supabaseClient';
 import LiquidPortal from '../components/LiquidPortal';
@@ -16,6 +16,63 @@ interface DebugLog {
   message: string;
   detail?: any;
 }
+
+const PERSONALITY_PRESETS: PersonalityPreset[] = [
+  {
+    id: 'default',
+    name: 'Default',
+    description: 'Standard balanced personality',
+    traits: ''
+  },
+  {
+    id: 'peter-thiel',
+    name: 'Peter Thiel',
+    description: 'Contrarian, first principles, monopoly thinking',
+    traits: 'Think like Peter Thiel: contrarian perspective, question consensus, focus on building monopolies and 0-to-1 innovation, emphasize secrets and non-obvious truths, long-term strategic thinking.'
+  },
+  {
+    id: 'elon-musk',
+    name: 'Elon Musk',
+    description: 'First principles, ambitious, engineering-focused',
+    traits: 'Think like Elon Musk: break down problems to first principles, extremely ambitious scale, focus on physics and engineering fundamentals, prefer doing rather than theorizing, optimize for speed and iteration.'
+  },
+  {
+    id: 'math-professor',
+    name: 'Math Professor',
+    description: 'Rigorous, proof-based, theoretical',
+    traits: 'Think like a mathematics professor: demand rigorous proof, use formal notation when helpful, emphasize axioms and logical structure, patient in explanations, precise with definitions and terminology.'
+  },
+  {
+    id: 'Warren-buffett',
+    name: 'Warren Buffett',
+    description: 'Value investing, long-term, simple principles',
+    traits: 'Think like Warren Buffett: focus on fundamental value and moats, long-term patient perspective, prefer simple understandable businesses, emphasize margin of safety, use folksy accessible analogies.'
+  },
+  {
+    id: 'steve-jobs',
+    name: 'Steve Jobs',
+    description: 'Design perfection, user experience, simplicity',
+    traits: 'Think like Steve Jobs: obsess over design and user experience, ruthlessly simplify, connect humanities with technology, high standards of excellence, focus on what users want before they know it.'
+  },
+  {
+    id: 'richard-feynman',
+    name: 'Richard Feynman',
+    description: 'Curiosity, first principles, clear explanations',
+    traits: 'Think like Richard Feynman: intense curiosity about how things really work, explain concepts from first principles using simple analogies, question everything including authority, playful approach to serious problems.'
+  },
+  {
+    id: 'ray-dalio',
+    name: 'Ray Dalio',
+    description: 'Principles-based, radical truth, systems thinking',
+    traits: 'Think like Ray Dalio: operate from clear principles, seek radical truth and transparency, think in systems and cycles, embrace mistakes as learning, mechanistic view of how things work.'
+  },
+  {
+    id: 'naval-ravikant',
+    name: 'Naval Ravikant',
+    description: 'Leverage, specific knowledge, philosophical',
+    traits: 'Think like Naval Ravikant: focus on leverage and specific knowledge, philosophical yet practical, emphasize long-term compounding, value clarity of thought, combine wisdom traditions with modern technology.'
+  }
+];
 
 const AGENTS: AgentConfig[] = [
   {
@@ -95,6 +152,12 @@ const App: React.FC = () => {
   
   const [roundtableSession, setRoundtableSession] = useState<RoundtableSession | null>(null);
   const [showRoundtableInput, setShowRoundtableInput] = useState(false);
+  
+  const [agentPersonalities, setAgentPersonalities] = useState<AgentPersonality[]>(
+    AGENTS.map(agent => ({ agentId: agent.id, presetId: 'default', customTraits: '' }))
+  );
+  const [showPersonalityEditor, setShowPersonalityEditor] = useState(false);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
   const [intensity, setIntensity] = useState(0);
@@ -303,8 +366,12 @@ const App: React.FC = () => {
       agentInputMixer.connect(scriptProcessor); 
       scriptProcessor.connect(ctx.destination);
 
-      const clusterNames = AGENTS.map(a => a.name).join(', ');
-      const systemInstruction = `${agent.instruction}\n\nNEURAL ETIQUETTE:\n1. You hear all room audio including peers.\n2. If another agent is speaking, YOU MUST STAY SILENT.\n3. If a peer is addressed by name, DO NOT INTERRUPT.\n4. Only one agent should talk to the user at a time. The Oracle is the lead. Yield the floor immediately if anyone else starts speaking.`;
+  const clusterNames = AGENTS.map(a => a.name).join(', ');
+  const personality = agentPersonalities.find(p => p.agentId === agent.id);
+  const personalityPreset = PERSONALITY_PRESETS.find(p => p.id === personality?.presetId);
+  const personalityTraits = personality?.customTraits || personalityPreset?.traits || '';
+  
+  const systemInstruction = `${agent.instruction}${personalityTraits ? `\n\nPERSONALITY: ${personalityTraits}` : ''}\n\nNEURAL ETIQUETTE:\n1. You hear all room audio including peers.\n2. If another agent is speaking, YOU MUST STAY SILENT.\n3. If a peer is addressed by name, DO NOT INTERRUPT.\n4. Only one agent should talk to the user at a time. The Oracle is the lead. Yield the floor immediately if anyone else starts speaking.`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -770,19 +837,27 @@ Format in markdown with headers (##) and bullet points.`;
             ))}
           </div>
           
-          <div className="mt-12 flex gap-4 items-center">
+          <div className="mt-12 flex flex-col gap-4 items-center">
             <button 
               onClick={() => setShowRoundtableInput(true)}
               className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold rounded-full transition-all shadow-lg hover:shadow-purple-500/50"
             >
               Start Roundtable
             </button>
-            <button 
-              onClick={() => setShowConfig(true)}
-              className="text-sm text-white/40 hover:text-white/80 transition underline"
-            >
-              Configure Database
-            </button>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => setShowPersonalityEditor(true)}
+                className="text-sm text-white/60 hover:text-white/90 transition underline"
+              >
+                Customize Personalities
+              </button>
+              <button 
+                onClick={() => setShowConfig(true)}
+                className="text-sm text-white/40 hover:text-white/80 transition underline"
+              >
+                Configure Database
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -815,6 +890,134 @@ Format in markdown with headers (##) and bullet points.`;
                 className="px-6 bg-white/10 hover:bg-white/20 rounded-lg transition"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Personality Editor Modal */}
+      {showPersonalityEditor && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-5xl w-full shadow-2xl my-8">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold font-outfit">Customize Agent Personalities</h2>
+                <p className="text-sm text-white/60 mt-1">
+                  Give each agent a unique thinking style or persona
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowPersonalityEditor(false);
+                  setEditingAgentId(null);
+                }}
+                className="text-white/60 hover:text-white transition text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {AGENTS.map(agent => {
+                const personality = agentPersonalities.find(p => p.agentId === agent.id);
+                const preset = PERSONALITY_PRESETS.find(p => p.id === personality?.presetId);
+                const isEditing = editingAgentId === agent.id;
+
+                return (
+                  <div 
+                    key={agent.id}
+                    className="bg-white/5 border border-white/10 rounded-xl p-4 hover:border-white/20 transition"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div 
+                        className={`w-3 h-3 rounded-full ${agent.colors.primary}`}
+                        style={{boxShadow: `0 0 10px ${agent.colors.glow}`}}
+                      />
+                      <span className="font-bold">{agent.name}</span>
+                    </div>
+                    
+                    <select
+                      value={personality?.presetId || 'default'}
+                      onChange={(e) => {
+                        setAgentPersonalities(prev => 
+                          prev.map(p => 
+                            p.agentId === agent.id 
+                              ? { ...p, presetId: e.target.value, customTraits: '' }
+                              : p
+                          )
+                        );
+                      }}
+                      className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 mb-2 text-sm focus:outline-none focus:border-cyan-500 transition"
+                    >
+                      {PERSONALITY_PRESETS.map(preset => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </option>
+                      ))}
+                    </select>
+                    
+                    <p className="text-xs text-white/50 mb-3 h-8">
+                      {preset?.description}
+                    </p>
+
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={personality?.customTraits || ''}
+                          onChange={(e) => {
+                            setAgentPersonalities(prev => 
+                              prev.map(p => 
+                                p.agentId === agent.id 
+                                  ? { ...p, customTraits: e.target.value }
+                                  : p
+                              )
+                            );
+                          }}
+                          placeholder="Add custom personality traits..."
+                          className="w-full bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-xs h-24 focus:outline-none focus:border-cyan-500 transition resize-none"
+                        />
+                        <button
+                          onClick={() => setEditingAgentId(null)}
+                          className="w-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-400 text-xs py-1.5 rounded transition"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEditingAgentId(agent.id)}
+                        className="w-full bg-white/5 hover:bg-white/10 border border-white/20 text-white/70 text-xs py-1.5 rounded transition"
+                      >
+                        {personality?.customTraits ? 'Edit Custom Traits' : 'Add Custom Traits'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => {
+                  setAgentPersonalities(AGENTS.map(agent => ({ 
+                    agentId: agent.id, 
+                    presetId: 'default', 
+                    customTraits: '' 
+                  })));
+                }}
+                className="px-6 bg-white/5 hover:bg-white/10 border border-white/20 rounded-lg py-2 transition text-sm"
+              >
+                Reset All
+              </button>
+              <button
+                onClick={() => {
+                  setShowPersonalityEditor(false);
+                  setEditingAgentId(null);
+                }}
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold py-2 rounded-lg transition"
+              >
+                Save & Close
               </button>
             </div>
           </div>
