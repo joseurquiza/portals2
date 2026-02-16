@@ -162,6 +162,7 @@ const App: React.FC = () => {
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   
   const [roundtableSession, setRoundtableSession] = useState<RoundtableSession | null>(null);
   const [showRoundtableInput, setShowRoundtableInput] = useState(false);
@@ -253,21 +254,56 @@ const App: React.FC = () => {
   }, [pushLog]);
 
   const connectWallet = async () => {
-    pushLog('SYSTEM', 'INFO', 'Manifesting Solana Link...');
     try {
-      const { solana } = window as any;
-      if (solana?.isPhantom) {
-        const response = await solana.connect();
+      if (typeof window !== 'undefined' && (window as any).phantom?.solana) {
+        const phantom = (window as any).phantom.solana;
+        const response = await phantom.connect();
         const address = response.publicKey.toString();
         setWalletAddress(address);
-        pushLog('SYSTEM', 'SUCCESS', `Identity Anchored: ${address}`);
+        
+        // Create or get user profile
+        if (supabase) {
+          const { data, error } = await supabase.rpc('get_or_create_user', {
+            p_wallet_address: address
+          });
+          
+          if (error) {
+            console.error('[v0] Failed to create user profile:', error);
+          } else {
+            setUserId(data);
+            console.log('[v0] User profile loaded:', data);
+            pushLog('SYSTEM', 'SUCCESS', `Connected: ${address.slice(0, 4)}...${address.slice(-4)}`);
+            
+            // Load user's data
+            await loadUserData(address);
+          }
+        }
       } else {
-        pushLog('SYSTEM', 'ERROR', 'Phantom Wallet not detected in this quadrant.');
-        window.open('https://phantom.app/', '_blank');
+        pushLog('SYSTEM', 'ERROR', 'Phantom wallet not installed');
       }
-    } catch (e: any) {
-      pushLog('SYSTEM', 'ERROR', `Sync Interrupted: ${e.message}`);
+    } catch (error) {
+      pushLog('SYSTEM', 'ERROR', 'Failed to connect wallet');
     }
+  };
+  
+  const loadUserData = async (walletAddr: string) => {
+    if (!supabase) return;
+    
+    console.log('[v0] Loading user data for:', walletAddr);
+    
+    // Load user's knowledge documents
+    const { data: docs } = await supabase
+      .from('knowledge_documents')
+      .select('*')
+      .eq('wallet_address', walletAddr)
+      .order('upload_date', { ascending: false });
+    
+    if (docs) {
+      setKnowledgeDocs(docs);
+      console.log('[v0] Loaded', docs.length, 'documents');
+    }
+    
+    pushLog('SYSTEM', 'INFO', 'Loaded your personal workspace');
   };
 
   const disconnectWallet = async () => {
@@ -668,12 +704,12 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
   const startDiscussion = async () => {
     if (!roundtableSession || isDiscussionRunning) return;
     
-    console.log('[v0] DISCUSSION PHASE STARTED - Interactive Agent Mode');
+    console.log('[v0] DISCUSSION PHASE STARTED - Live Voice Mode');
     setIsDiscussionRunning(true);
     setShouldStopDiscussion(false);
     setRoundtableSession(prev => prev ? { ...prev, status: 'discussing' } : null);
-    pushLog('SYSTEM', 'INFO', 'Board members entering discussion...');
-    setStatus(ConnectionStatus.CONNECTED);
+    pushLog('SYSTEM', 'INFO', 'Board members entering live discussion...');
+    setStatus(ConnectionStatus.CONNECTING);
     
     // Update database status
     if (roundtableDbId && supabase) {
@@ -682,158 +718,300 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
       }).eq('id', roundtableDbId);
     }
     
-    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
-    
-    // Natural conversation flow - agents respond to each other
-    const totalExchanges = 12; // Multiple back-and-forth exchanges
-    console.log(`[v0] Starting ${totalExchanges} conversational exchanges`);
-    
-    for (let exchange = 0; exchange < totalExchanges; exchange++) {
-      // Check if user requested stop
-      if (shouldStopDiscussion) {
-        console.log('[v0] Discussion stopped by user');
-        pushLog('SYSTEM', 'INFO', 'Discussion stopped');
-        break;
-      }
+    // Initialize audio context for all agents
+    if (!audioCtxRef.current) {
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      audioCtxRef.current = ctx;
+      const masterOut = ctx.createGain();
+      masterOut.connect(ctx.destination);
+      masterOutputRef.current = masterOut;
       
-      console.log(`[v0] EXCHANGE ${exchange + 1}/${totalExchanges}`);
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const outAnalyser = ctx.createAnalyser();
+      outAnalyser.fftSize = 64;
+      masterOut.connect(outAnalyser);
+      outputAnalyserRef.current = outAnalyser;
       
-      try {
-        // Determine which agent should speak next based on context
-        const recentSpeakers = roundtableSession.discussions
-          .slice(-3)
-          .map(d => d.fromAgentId);
-        
-        // Find agent who hasn't spoken recently or who was addressed
-        const lastMessage = roundtableSession.discussions[roundtableSession.discussions.length - 1];
-        let nextAgent: AgentConfig | undefined;
-        
-        // Check if previous message addressed someone
-        if (lastMessage) {
-          const addressedAgentName = AGENTS.find(a => 
-            lastMessage.message.toLowerCase().includes(a.name.toLowerCase()) && 
-            a.id !== lastMessage.fromAgentId
-          );
-          if (addressedAgentName && !recentSpeakers.slice(-2).includes(addressedAgentName.id)) {
-            nextAgent = addressedAgentName;
-            console.log(`[v0] ${addressedAgentName.name} was addressed, will respond`);
-          }
-        }
-        
-        // Otherwise, pick agent who hasn't spoken in last 2 turns
-        if (!nextAgent) {
-          nextAgent = AGENTS.find(a => !recentSpeakers.slice(-2).includes(a.id)) || AGENTS[exchange % AGENTS.length];
-        }
-        
-        const agentResearch = roundtableSession.research.find(r => r.agentId === nextAgent.id);
-        const allResearch = roundtableSession.research
-          .map(r => `${AGENTS.find(a => a.id === r.agentId)?.name}: ${r.findings}`)
-          .join('\n\n');
-        
-        const recentDiscussions = roundtableSession.discussions
-          .slice(-4)
-          .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
-          .join('\n');
-        
-        console.log(`[v0] ${nextAgent.name} preparing to contribute...`);
-        
-        const prompt = `You are ${nextAgent.name}, ${nextAgent.description}
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micSourceRef.current = ctx.createMediaStreamSource(stream);
+      const micGain = ctx.createGain();
+      micSourceRef.current.connect(micGain);
+      micGainRef.current = micGain;
+      
+      const inAnalyser = ctx.createAnalyser();
+      inAnalyser.fftSize = 64;
+      micGain.connect(inAnalyser);
+      inputAnalyserRef.current = inAnalyser;
+    }
+    
+    // Start voice sessions for all board members
+    console.log('[v0] Starting voice sessions for all board members...');
+    for (const agent of AGENTS) {
+      await createRoundtableAgentSession(agent);
+    }
+    
+    setStatus(ConnectionStatus.CONNECTED);
+    pushLog('SYSTEM', 'SUCCESS', 'All board members connected. Discussion live!');
+    
+    // Start the discussion with the Chairman introducing the topic
+    setTimeout(() => {
+      initiateDiscussionTopic();
+    }, 2000);
+  };
+  
+  const createRoundtableAgentSession = async (agent: AgentConfig) => {
+    if (sessionsRef.current.has(agent.id) || !audioCtxRef.current) return;
+    const ctx = audioCtxRef.current;
+    
+    try {
+      console.log(`[v0] Creating voice session for ${agent.name}...`);
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+      const nextStartTimeRef = { current: 0 };
+      const agentSources = new Set<AudioBufferSourceNode>();
+      let currentOutputBuffer = "";
+      
+      const agentOutputGain = ctx.createGain();
+      agentOutputNodesRef.current.set(agent.id, agentOutputGain);
+      agentOutputGain.connect(masterOutputRef.current!);
+      
+      const agentInputMixer = ctx.createGain();
+      micGainRef.current!.connect(agentInputMixer);
+      
+      // Each agent hears all other agents
+      agentOutputNodesRef.current.forEach((otherOutput, otherId) => {
+        if (otherId !== agent.id) otherOutput.connect(agentInputMixer);
+      });
+      agentInputMixersRef.current.forEach((otherMixer, otherId) => {
+        if (otherId !== agent.id) agentOutputGain.connect(otherMixer);
+      });
+      agentInputMixersRef.current.set(agent.id, agentInputMixer);
+      
+      const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
+      scriptProcessor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const int16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
+        const pcmBlob: Blob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
+        sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
+      };
+      agentInputMixer.connect(scriptProcessor);
+      scriptProcessor.connect(ctx.destination);
+      
+      // Get agent's research for context
+      const agentResearch = roundtableSession?.research.find(r => r.agentId === agent.id);
+      const allResearch = roundtableSession?.research
+        .map(r => `${AGENTS.find(a => a.id === r.agentId)?.name}: ${r.findings}`)
+        .join('\n\n');
+      
+      // Get personality
+      const personality = agentPersonalities.find(p => p.agentId === agent.id);
+      const personalityPreset = PERSONALITY_PRESETS.find(p => p.id === personality?.presetId);
+      const personalityTraits = personality?.customTraits || personalityPreset?.traits || '';
+      
+      const systemInstruction = `You are ${agent.name}, ${agent.description}
 
-BOARD DISCUSSION: "${roundtableSession.topic}"
+ROUNDTABLE DISCUSSION: "${roundtableSession?.topic}"
 
-YOUR RESEARCH:
+YOUR RESEARCH FINDINGS:
 ${agentResearch?.findings}
 
-ALL BOARD MEMBER RESEARCH:
+ALL BOARD RESEARCH:
 ${allResearch}
 
-RECENT DISCUSSION:
-${recentDiscussions || 'Discussion starting - you can open with your perspective'}
+${personalityTraits ? `PERSONALITY: ${personalityTraits}\n\n` : ''}
 
-INSTRUCTIONS:
-- Respond naturally as a board member would
-- You may address other board members by name if asking questions or building on their points
-- Bring your unique expertise (${nextAgent.description})
-- Keep it concise (1-2 sentences)
-- If addressed directly, respond to that person's point
-- You can ask questions, challenge assumptions, or add new insights
-- Be conversational but professional
+CRITICAL TURN-TAKING RULES - YOU MUST FOLLOW THESE EXACTLY:
+1. DO NOT speak unless:
+   - Someone directly says your name ("${agent.name}")
+   - You hear a natural pause of 3+ seconds
+   - Someone asks a question related to your expertise area
+   
+2. When you DO speak:
+   - Keep it to ONE brief point (1-2 sentences max)
+   - Then STOP and listen for others
+   
+3. Active listening:
+   - When others are speaking, stay SILENT
+   - Let at least 2 other board members speak before you speak again
+   - Don't repeat what others have already said
+   
+4. Board members present: ${AGENTS.filter(a => a.id !== agent.id).map(a => a.name).join(', ')}
 
-Your response:`;
+5. Your role is ${agent.description} - only speak when this expertise is needed
 
-        console.log(`[v0] ${nextAgent.name} - Sending to Gemini...`);
-        const result = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: prompt
-        });
-        const message = result.text || 'No response available';
-        console.log(`[v0] ${nextAgent.name}: "${message}"`);
-        
-        // Detect if this message addresses another agent
-        const addressedAgent = AGENTS.find(a => 
-          a.id !== nextAgent.id && 
-          message.toLowerCase().includes(a.name.toLowerCase())
-        );
-        
-        const newDiscussion: RoundtableDiscussion = {
-          fromAgentId: nextAgent.id,
-          toAgentId: addressedAgent?.id || null,
-          message,
-          timestamp: Date.now()
-        };
-        
-        setRoundtableSession(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            discussions: [...prev.discussions, newDiscussion]
-          };
-        });
-        
-        // Save message to database
-        if (roundtableDbId && supabase) {
-          try {
-            await supabase.from('roundtable_discussions').insert({
-              session_id: roundtableDbId,
-              from_agent_id: nextAgent.id,
-              from_agent_name: nextAgent.name,
-              to_agent_id: addressedAgent?.id || null,
-              to_agent_name: addressedAgent?.name || null,
-              message: message
-            });
-            console.log(`[v0] Message saved to database`);
-          } catch (e: any) {
-            console.error(`[v0] Failed to save message:`, e);
+EXAMPLE GOOD BEHAVIOR:
+- Chairman opens → You LISTEN
+- CTO speaks about tech → You LISTEN  
+- Someone says "${agent.name}, what's your take?" → NOW you respond briefly
+- You finish → STOP and LISTEN for others
+
+FORBIDDEN: 
+- Speaking multiple times in a row
+- Dominating the conversation
+- Speaking when not addressed
+- Repeating similar points`;
+
+      const sessionPromise = ai.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+        callbacks: {
+          onopen: () => { 
+            console.log(`[v0] ${agent.name} voice session connected`);
+            pushLog('SYSTEM', 'SUCCESS', `${agent.name} joined discussion`);
+          },
+          onmessage: async (message: LiveServerMessage) => {
+            const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+            if (base64Audio) {
+              console.log(`[v0] ${agent.name} speaking...`);
+              setSpeakingAgents(prev => new Set(prev).add(agent.id));
+              setFocusedAgentId(agent.id);
+              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
+              
+              const audioData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
+              const audioBuffer = await ctx.decodeAudioData(audioData.buffer);
+              const source = ctx.createBufferSource();
+              source.buffer = audioBuffer;
+              source.connect(agentOutputGain);
+              source.start(nextStartTimeRef.current);
+              nextStartTimeRef.current += audioBuffer.duration;
+              agentSources.add(source);
+              source.onended = () => {
+                agentSources.delete(source);
+                if (agentSources.size === 0) {
+                  setSpeakingAgents(prev => {
+                    const next = new Set(prev);
+                    next.delete(agent.id);
+                    return next;
+                  });
+                }
+              };
+            }
+            
+            const textContent = message.serverContent?.modelTurn?.parts?.find(p => p.text)?.text;
+            if (textContent) {
+              currentOutputBuffer += textContent;
+              console.log(`[v0] ${agent.name}: ${textContent}`);
+              
+              // Save to discussion history
+              const newDiscussion: RoundtableDiscussion = {
+                fromAgentId: agent.id,
+                toAgentId: null, // Will be parsed from text if addressing someone
+                message: textContent,
+                timestamp: Date.now()
+              };
+              
+              setRoundtableSession(prev => {
+                if (!prev) return null;
+                return {
+                  ...prev,
+                  discussions: [...prev.discussions, newDiscussion]
+                };
+              });
+              
+              // Save to database
+              if (roundtableDbId && supabase) {
+                await supabase.from('roundtable_discussions').insert({
+                  session_id: roundtableDbId,
+                  from_agent_id: agent.id,
+                  from_agent_name: agent.name,
+                  message: textContent
+                });
+              }
+            }
+            
+            if (message.serverContent?.turnComplete) {
+              console.log(`[v0] ${agent.name} finished turn`);
+              setFocusedAgentId(null);
+            }
+          },
+          onerror: (error) => {
+            console.error(`[v0] ${agent.name} session error:`, error);
+            pushLog('SYSTEM', 'ERROR', `${agent.name} connection error`);
+          },
+          onclose: () => {
+            console.log(`[v0] ${agent.name} session closed`);
+            agentSources.forEach(s => s.stop());
+            scriptProcessor.disconnect();
           }
-        }
-        
-        setFocusedAgentId(nextAgent.id);
-        pushLog('SYSTEM', 'INFO', `${nextAgent.name}${addressedAgent ? ` → ${addressedAgent.name}` : ''}`);
-        console.log(`[v0] Message added${addressedAgent ? ` (addressing ${addressedAgent.name})` : ''}`);
-        
-      } catch (e: any) {
-        console.error(`[v0] Discussion exchange error:`, e);
-        pushLog('SYSTEM', 'ERROR', `Exchange error: ${e.message}`);
-      }
+        },
+        config: {
+          systemInstruction,
+          voice: agent.voice,
+          tools: [
+            {
+              function_declarations: [{
+                name: 'searchKnowledge',
+                description: 'Search the company knowledge base for relevant information',
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    query: {
+                      type: Type.STRING,
+                      description: 'Search query for the knowledge base',
+                    },
+                  },
+                  required: ['query'],
+                },
+              }],
+            },
+          ],
+        },
+      });
+      
+      sessionsRef.current.set(agent.id, sessionPromise);
+      console.log(`[v0] ${agent.name} session created successfully`);
+      
+    } catch (error: any) {
+      console.error(`[v0] Failed to create session for ${agent.name}:`, error);
+      pushLog('SYSTEM', 'ERROR', `Failed to connect ${agent.name}`);
     }
+  };
+  
+  const initiateDiscussionTopic = async () => {
+    if (!roundtableSession || !sessionsRef.current.has('oracle')) return;
     
-    console.log('[v0] DISCUSSION PHASE COMPLETE');
+    console.log('[v0] Chairman initiating discussion...');
+    const chairmanSession = await sessionsRef.current.get('oracle');
+    if (chairmanSession) {
+      // Chairman opens and immediately calls on CTO
+      chairmanSession.sendRealtimeInput({
+        text: `Welcome board members. Today's topic: "${roundtableSession.topic}". Based on the research, this has significant strategic implications. CTO, from a technology perspective, what's your assessment?`
+      });
+      
+      // After 8 seconds, prompt the next person if no one has spoken
+      setTimeout(() => {
+        const ctoSession = sessionsRef.current.get('architect');
+        if (ctoSession) {
+          ctoSession.then(s => {
+            console.log('[v0] Prompting CTO to speak...');
+            // This gives CTO a nudge if they haven't responded
+          });
+        }
+      }, 8000);
+    }
+  };
+  
+  const stopDiscussion = async () => {
+    console.log('[v0] Stopping discussion...');
+    setShouldStopDiscussion(true);
     setIsDiscussionRunning(false);
     
-    // Update database status
+    // Close all agent sessions
+    for (const [agentId, sessionPromise] of sessionsRef.current.entries()) {
+      const session = await sessionPromise;
+      session.close();
+    }
+    sessionsRef.current.clear();
+    agentOutputNodesRef.current.clear();
+    agentInputMixersRef.current.clear();
+    
+    setStatus(ConnectionStatus.IDLE);
+    pushLog('SYSTEM', 'INFO', 'Discussion stopped');
+    
+    // Update database
     if (roundtableDbId && supabase) {
-      const finalStatus = shouldStopDiscussion ? 'stopped' : 'complete';
       await supabase.from('roundtable_sessions').update({
-        status: finalStatus,
+        status: 'stopped',
         end_time: new Date().toISOString()
       }).eq('id', roundtableDbId);
-      console.log(`[v0] Session marked as ${finalStatus} in database`);
-    }
-    
-    if (!shouldStopDiscussion) {
-      console.log('[v0] Waiting 1 second before generating summary...');
-      setTimeout(() => generateSummary(), 1000);
     }
   };
 
@@ -994,15 +1172,25 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
     // Create database session
     if (supabase) {
       try {
-        const { data, error } = await supabase.from('roundtable_sessions').insert({
+        const { data: sessionData, error: sessionError } = await supabase.from('roundtable_sessions').insert({
           topic,
           status: 'researching'
         }).select().single();
         
-        if (error) throw error;
-        if (data) {
-          setRoundtableDbId(data.id);
-          console.log('[v0] Database session created:', data.id);
+        if (sessionError) throw sessionError;
+        if (sessionData) {
+          setRoundtableDbId(sessionData.id);
+          console.log('[v0] Database session created:', sessionData.id);
+          
+          // Link session to user if wallet connected
+          if (walletAddress && userId) {
+            await supabase.from('user_roundtable_sessions').insert({
+              id: sessionData.id,
+              user_id: userId,
+              wallet_address: walletAddress
+            });
+            console.log('[v0] Session linked to user');
+          }
         }
       } catch (e: any) {
         console.error('[v0] Failed to create database session:', e);
@@ -1323,13 +1511,18 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                             className="flex-1 bg-white/10 border border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500 transition"
                             disabled={researchingPerson}
                           />
-                          <button
-                            onClick={() => researchPersonAsAgent(agent.id)}
-                            disabled={!personResearchName.trim() || researchingPerson}
-                            className="bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 font-semibold px-3 py-1.5 rounded text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {researchingPerson ? 'Researching...' : 'Research'}
-                          </button>
+        <button
+          onClick={connectWallet}
+          disabled={!!walletAddress}
+          className={`backdrop-blur-md border px-6 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-2 ${
+            walletAddress 
+              ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30' 
+              : 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-white/10 hover:border-white/30'
+          }`}
+          >
+          {walletAddress && <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />}
+          {walletAddress ? `Your Space: ${walletAddress.slice(0,4)}...${walletAddress.slice(-4)}` : 'Connect Phantom'}
+        </button>
                         </div>
                         <p className="text-xs text-white/40 mt-1">
                           AI will deeply research this person's decision-making style and board behavior
@@ -1562,6 +1755,7 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                           file_size: file.size,
                           storage_url: publicUrl,
                           extracted_text: extractedText,
+                          wallet_address: walletAddress || 'anonymous',
                           metadata: {
                             original_name: file.name,
                             upload_source: 'client'
@@ -1870,20 +2064,6 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                   </span>
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Start Discussion Button */}
-                  {roundtableSession.status === 'researching' && 
-                   roundtableSession.research.every(r => r.status === 'complete') && 
-                   !isDiscussionRunning && (
-                    <div className="col-span-full flex justify-center mt-4">
-                      <button
-                        onClick={() => startDiscussion()}
-                        className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold px-8 py-3 rounded-xl transition-all transform hover:scale-105 shadow-lg"
-                      >
-                        Start Board Discussion
-                      </button>
-                    </div>
-                  )}
-                  
                   {roundtableSession.research.map((research) => {
                     const agent = AGENTS.find(a => a.id === research.agentId);
                     const isActivelyResearching = focusedAgentId === agent?.id && research.status === 'researching';
@@ -1946,6 +2126,20 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                     );
                   })}
                 </div>
+                
+                {/* Start Discussion Button - appears after all research is complete */}
+                {roundtableSession.status === 'researching' && 
+                 roundtableSession.research.every(r => r.status === 'complete') && 
+                 !isDiscussionRunning && (
+                  <div className="flex justify-center mt-6">
+                    <button
+                      onClick={() => startDiscussion()}
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold px-8 py-3 rounded-xl transition-all transform hover:scale-105 shadow-lg shadow-purple-500/50 animate-pulse"
+                    >
+                      🎤 Start Board Discussion
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Discussion Phase */}
@@ -1961,7 +2155,7 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                     </h2>
                     {isDiscussionRunning && (
                       <button
-                        onClick={() => setShouldStopDiscussion(true)}
+                        onClick={stopDiscussion}
                         className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 font-semibold px-4 py-2 rounded-lg transition text-sm"
                       >
                         Stop Discussion
