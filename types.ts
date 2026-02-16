@@ -38,3 +38,39 @@ export interface AgentConfig {
     glow: string;
   };
 }
+
+export interface RoundtableResearch {
+  agentId: string;
+  findings: string;
+  timestamp: number;
+  status: 'researching' | 'complete';
+}
+
+export interface RoundtableDiscussion {
+  fromAgentId: string;
+  toAgentId: string | null; // null means addressing the group
+  message: string;
+  timestamp: number;
+}
+
+export interface RoundtableSession {
+  topic: string;
+  research: RoundtableResearch[];
+  discussions: RoundtableDiscussion[];
+  summary: string | null;
+  status: 'setup' | 'researching' | 'discussing' | 'summarizing' | 'complete';
+  startTime: number;
+}
+
+export interface PersonalityPreset {
+  id: string;
+  name: string;
+  description: string;
+  traits: string;
+}
+
+export interface AgentPersonality {
+  agentId: string;
+  presetId: string;
+  customTraits?: string;
+}
