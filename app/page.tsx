@@ -923,7 +923,6 @@ FORBIDDEN:
           onclose: () => {
             console.log(`[v0] ${agent.name} session closed`);
             agentSources.forEach(s => s.stop());
-            scriptProcessor.disconnect();
           }
         },
         config: {
