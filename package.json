@@ -1,5 +1,5 @@
 {
-  "name": "portals",
+  "name": "boardroom",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,7 +13,10 @@
     "react-dom": "^19.2.3",
     "next": "^16.1.0",
     "@google/genai": "^1.37.0",
-    "@supabase/supabase-js": "^2.39.7"
+    "@supabase/supabase-js": "^2.39.7",
+    "pdfjs-dist": "^4.0.379",
+    "tesseract.js": "^5.0.4",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

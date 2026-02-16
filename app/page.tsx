@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, Type, FunctionDeclaration } from '@google/genai';
-import { ConnectionStatus, TranscriptionItem, AgentConfig, RoundtableSession, RoundtableResearch, RoundtableDiscussion, PersonalityPreset, AgentPersonality } from '../types';
+import { ConnectionStatus, TranscriptionItem, AgentConfig, RoundtableSession, RoundtableResearch, RoundtableDiscussion, PersonalityPreset, AgentPersonality, KnowledgeDocument } from '../types';
 import { decode, encode, decodeAudioData } from '../utils/audioUtils';
 import { supabase as initialSupabase } from '../supabaseClient';
 import LiquidPortal from '../components/LiquidPortal';
@@ -136,13 +136,26 @@ const summonAgentDeclaration: FunctionDeclaration = {
   },
 };
 
+const searchKnowledgeDeclaration: FunctionDeclaration = {
+  name: 'searchKnowledge',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Search the company knowledge base for relevant documents, data, and information. Use this to find context from uploaded PDFs, documents, spreadsheets, and images.',
+    properties: {
+      query: {
+        type: Type.STRING,
+        description: 'The search query to find relevant documents. Use keywords and phrases from the conversation context.',
+      },
+      limit: {
+        type: Type.NUMBER,
+        description: 'Maximum number of results to return (default: 3)',
+      }
+    },
+    required: ['query'],
+  },
+};
+
 const App: React.FC = () => {
-  const [config, setConfig] = useState({
-    supabaseUrl: typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_URL') || '' : '',
-    supabaseKey: typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_ANON_KEY') || '' : ''
-  });
-  
-  const [showConfig, setShowConfig] = useState(!config.supabaseUrl);
   const [view, setView] = useState<'home' | 'portal' | 'roundtable'>('home');
   const [activeAgent, setActiveAgent] = useState<AgentConfig>(AGENTS[0]);
   const [collaborators, setCollaborators] = useState<AgentConfig[]>([]);
@@ -158,6 +171,10 @@ const App: React.FC = () => {
   );
   const [showPersonalityEditor, setShowPersonalityEditor] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  
+  const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDocument[]>([]);
   
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
   const [intensity, setIntensity] = useState(0);
@@ -201,14 +218,17 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initSupabaseClient = async () => {
-      if (config.supabaseUrl && config.supabaseKey) {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      
+      if (supabaseUrl && supabaseKey) {
         const { createClient } = await import('@supabase/supabase-js');
-        setSupabase(createClient(config.supabaseUrl, config.supabaseKey));
-        pushLog('SYSTEM', 'INFO', 'Matrix Database Link Latched.');
+        setSupabase(createClient(supabaseUrl, supabaseKey));
+        pushLog('SYSTEM', 'INFO', 'Database connection established.');
       }
     };
     initSupabaseClient();
-  }, [config.supabaseUrl, config.supabaseKey, pushLog]);
+  }, [pushLog]);
 
   // Phantom Wallet logic
   useEffect(() => {
@@ -288,7 +308,7 @@ const App: React.FC = () => {
     setCollaborators([]);
     setTranscriptions([]);
     setStatus(ConnectionStatus.CONNECTING);
-    pushLog('SYSTEM', 'INFO', `Manifesting ${host.name} cluster...`);
+    pushLog('SYSTEM', 'INFO', `Starting board session with ${host.name}...`);
 
     if (supabase) {
       try {
@@ -371,7 +391,7 @@ const App: React.FC = () => {
   const personalityPreset = PERSONALITY_PRESETS.find(p => p.id === personality?.presetId);
   const personalityTraits = personality?.customTraits || personalityPreset?.traits || '';
   
-  const systemInstruction = `${agent.instruction}${personalityTraits ? `\n\nPERSONALITY: ${personalityTraits}` : ''}\n\nNEURAL ETIQUETTE:\n1. You hear all room audio including peers.\n2. If another agent is speaking, YOU MUST STAY SILENT.\n3. If a peer is addressed by name, DO NOT INTERRUPT.\n4. Only one agent should talk to the user at a time. The Oracle is the lead. Yield the floor immediately if anyone else starts speaking.`;
+  const systemInstruction = `${agent.instruction}${personalityTraits ? `\n\nPERSONALITY: ${personalityTraits}` : ''}\n\nTOOLS AVAILABLE:\n- Use searchKnowledge(query) to search the company knowledge base for relevant documents, data, and context. The knowledge base contains uploaded PDFs, documents, spreadsheets, and images. Always search when you need specific company information, technical details, or data that might be in uploaded documents.\n\nNEURAL ETIQUETTE:\n1. You hear all room audio including peers.\n2. If another agent is speaking, YOU MUST STAY SILENT.\n3. If a peer is addressed by name, DO NOT INTERRUPT.\n4. Only one agent should talk to the user at a time. The Oracle is the lead. Yield the floor immediately if anyone else starts speaking.`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -464,18 +484,51 @@ const App: React.FC = () => {
                     }));
                   }
                 }
+                
+                if (fc.name === 'searchKnowledge') {
+                  const { query, limit = 3 } = fc.args as any;
+                  pushLog('SYSTEM', 'INFO', `${agent.name} searching knowledge base: "${query}"`);
+                  
+                  // Call knowledge search API
+                  fetch('/api/knowledge/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, limit })
+                  })
+                  .then(res => res.json())
+                  .then(data => {
+                    const results = data.results || [];
+                    const responseText = results.length > 0
+                      ? `Found ${results.length} relevant document(s):\n\n${results.map((r: any, i: number) => 
+                          `${i + 1}. ${r.filename} (${r.file_type})\nRelevant excerpt: ${r.extracted_text?.substring(0, 300)}...`
+                        ).join('\n\n')}`
+                      : `No relevant documents found for query: "${query}"`;
+                    
+                    sessionPromise.then(s => s.sendToolResponse({
+                      functionResponses: [{ id: fc.id, name: fc.name, response: { result: responseText } }]
+                    }));
+                    
+                    pushLog('SYSTEM', 'SUCCESS', `Knowledge search returned ${results.length} results`);
+                  })
+                  .catch(err => {
+                    console.error('[v0] Knowledge search error:', err);
+                    sessionPromise.then(s => s.sendToolResponse({
+                      functionResponses: [{ id: fc.id, name: fc.name, response: { result: 'Knowledge search failed. Please try again.' } }]
+                    }));
+                  });
+                }
               }
             }
           }
         },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice } } },
-          systemInstruction: systemInstruction,
-          tools: [{ functionDeclarations: [summonAgentDeclaration] }],
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-        }
+  config: {
+  responseModalities: [Modality.AUDIO],
+  speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice } } },
+  systemInstruction: systemInstruction,
+  tools: [{ functionDeclarations: [summonAgentDeclaration, searchKnowledgeDeclaration] }],
+  inputAudioTranscription: {},
+  outputAudioTranscription: {},
+  }
       });
       sessionsRef.current.set(agent.id, { agentId: agent.id, promise: sessionPromise });
     } catch (e) { pushLog('NETWORK', 'ERROR', `Agent Manifest Error: ${agent.name}`, e); }
@@ -507,7 +560,7 @@ const App: React.FC = () => {
     setSessionId(null);
     setRoundtableSession(null);
     setView('home');
-    pushLog('SYSTEM', 'INFO', 'Neural Cluster Shut Down.');
+    pushLog('SYSTEM', 'INFO', 'Board session ended.');
   }, [pushLog]);
 
   const startRoundtable = async (topic: string) => {
@@ -551,9 +604,13 @@ const App: React.FC = () => {
     pushLog('SYSTEM', 'INFO', 'All agents researching topic...');
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
-    // Each agent does independent research
-    const researchPromises = AGENTS.map(async (agent) => {
+    // Research agents sequentially to show live progress
+    for (const agent of AGENTS) {
       try {
+        // Mark as actively researching
+        setFocusedAgentId(agent.id);
+        pushLog('SYSTEM', 'INFO', `${agent.name} researching...`);
+        
         const prompt = `You are ${agent.name}. ${agent.description}
 
 Research this topic from your unique perspective: "${topic}"
@@ -579,14 +636,23 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
         });
         
         pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
-        return { agentId: agent.id, findings };
       } catch (e: any) {
         pushLog('SYSTEM', 'ERROR', `${agent.name} research failed: ${e.message}`);
-        return { agentId: agent.id, findings: 'Research unavailable' };
+        setRoundtableSession(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            research: prev.research.map(r => 
+              r.agentId === agent.id 
+                ? { ...r, findings: 'Research unavailable', status: 'complete' as const }
+                : r
+            )
+          };
+        });
       }
-    });
+    }
     
-    await Promise.all(researchPromises);
+    setFocusedAgentId(null);
     
     // Move to discussion phase
     setTimeout(() => startDiscussion(), 2000);
@@ -745,49 +811,9 @@ Format in markdown with headers (##) and bullet points.`;
     return () => cancelAnimationFrame(frameId);
   }, [status]);
 
-  const handleSaveConfig = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('SUPABASE_URL', config.supabaseUrl);
-      localStorage.setItem('SUPABASE_ANON_KEY', config.supabaseKey);
-      setShowConfig(false);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
-      {/* Config Modal */}
-      {showConfig && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-md w-full shadow-2xl">
-            <h2 className="text-2xl font-bold mb-4 font-outfit">System Configuration</h2>
-            <p className="text-sm text-white/60 mb-6">Connect to your Supabase database to enable session persistence.</p>
-            <input 
-              type="text" 
-              placeholder="Supabase URL" 
-              value={config.supabaseUrl}
-              onChange={(e) => setConfig({...config, supabaseUrl: e.target.value})}
-              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:border-cyan-500 transition"
-            />
-            <input 
-              type="password" 
-              placeholder="Supabase Anon Key" 
-              value={config.supabaseKey}
-              onChange={(e) => setConfig({...config, supabaseKey: e.target.value})}
-              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-6 focus:outline-none focus:border-cyan-500 transition"
-            />
-            <div className="flex gap-3">
-              <button onClick={handleSaveConfig} className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-3 rounded-lg transition">
-                Save & Continue
-              </button>
-              <button onClick={() => setShowConfig(false)} className="px-6 bg-white/10 hover:bg-white/20 rounded-lg transition">
-                Skip
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Wallet & Debug Header */}
+  <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
+  {/* Wallet & Debug Header */}
       <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-6 z-40">
         <button 
           onClick={handleWalletAction}
@@ -822,50 +848,117 @@ Format in markdown with headers (##) and bullet points.`;
 
       {/* HOME VIEW */}
       {view === 'home' && (
-        <div className="flex flex-col items-center justify-center min-h-screen relative z-10 px-4">
-          <h1 className="text-6xl md:text-8xl font-bold mb-4 font-outfit bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
-            PORTALS
-          </h1>
-          <p className="text-white/60 text-lg mb-12 text-center max-w-md">
-            Summon specialized AI agents into a live, voice-powered collaboration cluster.
-          </p>
-          
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl w-full">
-            {AGENTS.map(agent => (
-              <button 
-                key={agent.id}
-                onClick={() => startCluster(agent)}
-                className="group relative bg-gradient-to-br from-white/5 to-white/[0.02] backdrop-blur-sm border border-white/10 hover:border-white/30 rounded-2xl p-6 transition-all hover:scale-105 hover:shadow-2xl overflow-hidden"
-              >
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{background: `radial-gradient(circle at 50% 50%, ${agent.colors.glow}22, transparent)`}} />
-                <div className="relative z-10">
-                  <div className={`w-12 h-12 rounded-full ${agent.colors.primary} mb-4 shadow-lg`} style={{boxShadow: `0 0 30px ${agent.colors.glow}66`}} />
-                  <h3 className="text-xl font-bold mb-2 font-outfit">{agent.name}</h3>
-                  <p className="text-sm text-white/60">{agent.description}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-          
-          <div className="mt-12 flex flex-col gap-4 items-center">
-            <button 
-              onClick={() => setShowRoundtableInput(true)}
-              className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold rounded-full transition-all shadow-lg hover:shadow-purple-500/50"
-            >
-              Start Roundtable
-            </button>
-            <div className="flex gap-4">
+        <div className="flex flex-col min-h-screen relative z-10">
+          {/* Hero Section */}
+          <div className="flex-1 flex flex-col items-center justify-center px-4 py-20">
+            <div className="max-w-6xl mx-auto text-center mb-20">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 mb-8 backdrop-blur-sm">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                <span className="text-sm text-white/70">AI-Powered Board Advisors</span>
+              </div>
+              
+              <h1 className="text-7xl md:text-8xl lg:text-9xl font-bold mb-8 font-outfit leading-none tracking-tight">
+                <span className="bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-transparent">
+                  BoardRoom
+                </span>
+              </h1>
+              
+              <p className="text-2xl md:text-3xl lg:text-4xl text-white/80 mb-6 font-light leading-tight max-w-4xl mx-auto">
+                Your AI Board of Directors for Startups
+              </p>
+              
+              <p className="text-lg md:text-xl text-white/50 mb-12 max-w-2xl mx-auto leading-relaxed">
+                Five specialized AI agents providing expert guidance through live voice conversations, collaborative discussions, and intelligent knowledge search.
+              </p>
+              
+              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-16">
+                <button 
+                  onClick={() => setShowRoundtableInput(true)}
+                  className="group relative px-8 py-4 bg-white text-black font-semibold rounded-xl transition-all hover:scale-105 hover:shadow-2xl hover:shadow-white/20"
+                >
+                  Start Board Meeting
+                  <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 opacity-0 group-hover:opacity-100 transition-opacity -z-10 blur-xl" />
+                </button>
+                <button 
+                  onClick={() => setShowKnowledgeBase(true)}
+                  className="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white font-semibold rounded-xl transition-all backdrop-blur-sm"
+                >
+                  Upload Company Data
+                </button>
+              </div>
+            </div>
+            
+            {/* Agent Cards */}
+            <div className="max-w-7xl w-full px-4">
+              <div className="text-center mb-12">
+                <h2 className="text-3xl md:text-4xl font-bold mb-4 font-outfit">Meet Your Board Members</h2>
+                <p className="text-white/60 text-lg">Click any advisor to start a live voice session</p>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                {AGENTS.map((agent, idx) => (
+                  <button 
+                    key={agent.id}
+                    onClick={() => startCluster(agent)}
+                    className="group relative bg-gradient-to-b from-white/[0.07] to-white/[0.02] backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-2xl p-8 transition-all hover:-translate-y-2 hover:shadow-2xl overflow-hidden"
+                    style={{
+                      animationDelay: `${idx * 100}ms`,
+                      animation: 'fadeInUp 0.6s ease-out forwards',
+                      opacity: 0
+                    }}
+                  >
+                    {/* Glow Effect */}
+                    <div 
+                      className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700" 
+                      style={{background: `radial-gradient(circle at 50% 0%, ${agent.colors.glow}15, transparent 70%)`}} 
+                    />
+                    
+                    {/* Content */}
+                    <div className="relative z-10 flex flex-col items-center text-center">
+                      <div 
+                        className={`w-20 h-20 rounded-2xl ${agent.colors.primary} mb-6 shadow-lg transition-transform group-hover:scale-110 group-hover:rotate-3 flex items-center justify-center`} 
+                        style={{boxShadow: `0 10px 40px ${agent.colors.glow}40`}}
+                      >
+                        <span className="text-3xl">
+                          {agent.id === 'oracle' && '🔮'}
+                          {agent.id === 'architect' && '🏗️'}
+                          {agent.id === 'ledger' && '💰'}
+                          {agent.id === 'muse' && '🎨'}
+                          {agent.id === 'sentinel' && '🛡️'}
+                        </span>
+                      </div>
+                      <h3 className="text-2xl font-bold mb-3 font-outfit group-hover:text-white transition-colors">{agent.name}</h3>
+                      <p className="text-sm text-white/60 leading-relaxed mb-4">{agent.description}</p>
+                      <div className="flex items-center gap-2 text-xs text-white/40">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span>Available now</span>
+                      </div>
+                    </div>
+                    
+                    {/* Hover Arrow */}
+                    <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                      <svg className="w-5 h-5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                      </svg>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {/* Quick Actions */}
+            <div className="mt-20 flex flex-wrap gap-6 justify-center text-sm">
               <button 
                 onClick={() => setShowPersonalityEditor(true)}
-                className="text-sm text-white/60 hover:text-white/90 transition underline"
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all group"
               >
-                Customize Personalities
+                <span className="text-white/70 group-hover:text-white transition-colors">⚙️ Customize Personalities</span>
               </button>
               <button 
-                onClick={() => setShowConfig(true)}
-                className="text-sm text-white/40 hover:text-white/80 transition underline"
+                onClick={() => setShowKnowledgeBase(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all group"
               >
-                Configure Database
+                <span className="text-white/70 group-hover:text-white transition-colors">📚 Knowledge Base</span>
               </button>
             </div>
           </div>
@@ -1028,6 +1121,166 @@ Format in markdown with headers (##) and bullet points.`;
                 className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold py-2 rounded-lg transition"
               >
                 Save & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Knowledge Base Modal */}
+      {showKnowledgeBase && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-4xl w-full shadow-2xl my-8">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold font-outfit">Company Knowledge Base</h2>
+                <p className="text-sm text-white/60 mt-1">
+                  Upload documents, PDFs, spreadsheets, and images. Agents can search and reference them during conversations.
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowKnowledgeBase(false)}
+                className="text-white/60 hover:text-white transition text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Upload Area */}
+            <div className="border-2 border-dashed border-white/20 rounded-xl p-8 mb-6 hover:border-cyan-500/50 transition">
+              <input
+                type="file"
+                id="knowledge-upload"
+                multiple
+                accept=".pdf,.txt,.md,.doc,.docx,.csv,.xlsx,.png,.jpg,.jpeg"
+                className="hidden"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (files.length === 0) return;
+                  
+                  setUploadingFiles(true);
+                  pushLog('SYSTEM', 'INFO', `Uploading ${files.length} file(s)...`);
+                  
+                  for (const file of files) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    try {
+                      const res = await fetch('/api/knowledge/upload', {
+                        method: 'POST',
+                        body: formData
+                      });
+                      
+                      if (res.ok) {
+                        const data = await res.json();
+                        pushLog('SYSTEM', 'SUCCESS', `Uploaded: ${file.name}`);
+                        setKnowledgeDocs(prev => [data.document, ...prev]);
+                      } else {
+                        pushLog('SYSTEM', 'ERROR', `Failed to upload: ${file.name}`);
+                      }
+                    } catch (err) {
+                      console.error('[v0] Upload error:', err);
+                      pushLog('SYSTEM', 'ERROR', `Upload error: ${file.name}`);
+                    }
+                  }
+                  
+                  setUploadingFiles(false);
+                  e.target.value = '';
+                }}
+              />
+              <label 
+                htmlFor="knowledge-upload"
+                className="flex flex-col items-center cursor-pointer"
+              >
+                <div className="text-5xl mb-4">📁</div>
+                <div className="text-lg font-semibold mb-2">
+                  {uploadingFiles ? 'Uploading...' : 'Click to Upload Documents'}
+                </div>
+                <div className="text-sm text-white/50">
+                  Supports: PDF, Text, Word, Excel, Images (PNG, JPG)
+                </div>
+              </label>
+            </div>
+
+            {/* Document List */}
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {knowledgeDocs.length === 0 && !uploadingFiles && (
+                <div className="text-center text-white/40 py-8">
+                  No documents uploaded yet. Upload files to give your agents context.
+                </div>
+              )}
+              
+              {knowledgeDocs.map((doc) => (
+                <div 
+                  key={doc.id}
+                  className="bg-white/5 border border-white/10 rounded-lg p-4 hover:bg-white/10 transition flex items-center gap-4"
+                >
+                  <div className="text-3xl">
+                    {doc.file_type === 'application/pdf' && '📄'}
+                    {doc.file_type.includes('text') && '📝'}
+                    {doc.file_type.includes('spreadsheet') && '📊'}
+                    {doc.file_type.includes('image') && '🖼️'}
+                    {!['application/pdf', 'text', 'spreadsheet', 'image'].some(t => doc.file_type.includes(t)) && '📎'}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-semibold">{doc.filename}</div>
+                    <div className="text-xs text-white/50">
+                      {(doc.file_size / 1024).toFixed(1)} KB • Uploaded {new Date(doc.upload_date).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (confirm(`Delete ${doc.filename}?`)) {
+                        // Delete from database
+                        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+                        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+                        
+                        if (supabaseUrl && supabaseKey) {
+                          const { createClient } = await import('@supabase/supabase-js');
+                          const supabase = createClient(supabaseUrl, supabaseKey);
+                          
+                          await supabase.from('knowledge_documents').delete().eq('id', doc.id);
+                          setKnowledgeDocs(prev => prev.filter(d => d.id !== doc.id));
+                          pushLog('SYSTEM', 'INFO', `Deleted: ${doc.filename}`);
+                        }
+                      }
+                    }}
+                    className="text-red-400 hover:text-red-300 text-sm"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={async () => {
+                  // Load existing documents
+                  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+                  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+                  
+                  if (supabaseUrl && supabaseKey) {
+                    const { createClient } = await import('@supabase/supabase-js');
+                    const supabase = createClient(supabaseUrl, supabaseKey);
+                    
+                    const { data } = await supabase
+                      .from('knowledge_documents')
+                      .select('*')
+                      .order('upload_date', { ascending: false });
+                    
+                    if (data) setKnowledgeDocs(data);
+                  }
+                }}
+                className="px-6 bg-white/5 hover:bg-white/10 border border-white/20 rounded-lg py-2 transition text-sm"
+              >
+                Refresh List
+              </button>
+              <button
+                onClick={() => setShowKnowledgeBase(false)}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2 rounded-lg transition"
+              >
+                Close
               </button>
             </div>
           </div>
@@ -1201,34 +1454,69 @@ Format in markdown with headers (##) and bullet points.`;
                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                   <span className="text-2xl">🔍</span>
                   Research Phase
+                  <span className="ml-auto text-xs text-white/40">
+                    {roundtableSession.research.filter(r => r.status === 'complete').length} / {AGENTS.length} complete
+                  </span>
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {roundtableSession.research.map((research) => {
                     const agent = AGENTS.find(a => a.id === research.agentId);
+                    const isActivelyResearching = focusedAgentId === agent?.id && research.status === 'researching';
                     if (!agent) return null;
                     return (
                       <div 
                         key={research.agentId}
-                        className={`bg-white/5 border ${research.status === 'complete' ? 'border-emerald-500/50' : 'border-white/10'} rounded-xl p-4 transition-all`}
+                        className={`relative bg-white/5 border rounded-xl p-4 transition-all ${
+                          research.status === 'complete' 
+                            ? 'border-emerald-500/50' 
+                            : isActivelyResearching 
+                            ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/20' 
+                            : 'border-white/10'
+                        } ${isActivelyResearching ? 'scale-105' : ''}`}
                       >
-                        <div className="flex items-center gap-2 mb-3">
+                        {/* Active research glow */}
+                        {isActivelyResearching && (
                           <div 
-                            className={`w-3 h-3 rounded-full ${agent.colors.primary}`}
-                            style={{boxShadow: `0 0 10px ${agent.colors.glow}`}}
+                            className="absolute inset-0 rounded-xl opacity-20 animate-pulse"
+                            style={{background: `radial-gradient(circle at 50% 50%, ${agent.colors.glow}, transparent 70%)`}}
                           />
-                          <span className="font-bold">{agent.name}</span>
-                          {research.status === 'researching' && (
-                            <div className="ml-auto">
-                              <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                        )}
+                        
+                        <div className="relative z-10">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div 
+                              className={`w-3 h-3 rounded-full ${agent.colors.primary} transition-all ${isActivelyResearching ? 'animate-pulse' : ''}`}
+                              style={{boxShadow: `0 0 ${isActivelyResearching ? '20px' : '10px'} ${agent.colors.glow}`}}
+                            />
+                            <span className="font-bold">{agent.name}</span>
+                            {research.status === 'researching' && (
+                              <div className="ml-auto flex items-center gap-2">
+                                {isActivelyResearching && (
+                                  <span className="text-xs text-cyan-400 font-semibold">Researching now</span>
+                                )}
+                                <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                              </div>
+                            )}
+                            {research.status === 'complete' && (
+                              <div className="ml-auto flex items-center gap-1">
+                                <span className="text-xs text-emerald-400">Done</span>
+                                <div className="text-emerald-400">✓</div>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {research.findings ? (
+                            <p className="text-sm text-white/70 leading-relaxed">
+                              {research.findings}
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="h-2 bg-white/10 rounded animate-pulse" style={{width: '100%'}} />
+                              <div className="h-2 bg-white/10 rounded animate-pulse" style={{width: '85%'}} />
+                              <div className="h-2 bg-white/10 rounded animate-pulse" style={{width: '60%'}} />
                             </div>
                           )}
-                          {research.status === 'complete' && (
-                            <div className="ml-auto text-emerald-400">✓</div>
-                          )}
                         </div>
-                        <p className="text-sm text-white/70">
-                          {research.findings || 'Researching...'}
-                        </p>
                       </div>
                     );
                   })}

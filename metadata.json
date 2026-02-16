@@ -1,6 +1,6 @@
 {
-  "name": "PORTALS",
-  "description": "A high-end multi-agent AI voice system featuring beautiful, animated liquid portal interfaces powered by Gemini Live API.",
+  "name": "BoardRoom",
+  "description": "Your AI board of directors for startups. Five specialized AI agents provide expert guidance through live voice conversations, collaborative discussions, and intelligent search of your company knowledge.",
   "requestFramePermissions": [
     "microphone"
   ]
