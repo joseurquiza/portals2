@@ -933,9 +933,12 @@ FORBIDDEN:
           }
         },
         config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: agent.voice } } },
           systemInstruction,
-          voice: agent.voice,
           tools: [{ functionDeclarations: [searchKnowledgeDeclaration] }],
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
         },
       });
       
