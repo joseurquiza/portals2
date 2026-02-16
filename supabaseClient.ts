@@ -1,9 +1,7 @@
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@^2.39.7';
-
 const resolveEnv = (key: string): string | undefined => {
-  const env = (process as any).env || {};
-  return localStorage.getItem(key) || env[key] || env[`VITE_${key}`] || env[`NEXT_PUBLIC_${key}`] || env[`REACT_APP_${key}`];
+  if (typeof window === 'undefined') return undefined;
+  return localStorage.getItem(key);
 };
 
 export const getSupabaseConfig = () => ({
@@ -12,15 +10,7 @@ export const getSupabaseConfig = () => ({
 });
 
 export const initSupabase = () => {
-  const { url, key } = getSupabaseConfig();
-  if (url && key) {
-    try {
-      return createClient(url, key);
-    } catch (e) {
-      console.error("Failed to init Supabase client", e);
-      return null;
-    }
-  }
+  // Return null - will be initialized dynamically in the component
   return null;
 };
 

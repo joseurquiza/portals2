@@ -1,10 +1,11 @@
+'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, Type, FunctionDeclaration } from '@google/genai';
-import { ConnectionStatus, TranscriptionItem, AgentConfig } from './types';
-import { decode, encode, decodeAudioData } from './utils/audioUtils';
-import { supabase as initialSupabase } from './supabaseClient';
-import LiquidPortal from './components/LiquidPortal';
+import { ConnectionStatus, TranscriptionItem, AgentConfig } from '../types';
+import { decode, encode, decodeAudioData } from '../utils/audioUtils';
+import { supabase as initialSupabase } from '../supabaseClient';
+import LiquidPortal from '../components/LiquidPortal';
 
 // --- Types ---
 interface DebugLog {
@@ -80,8 +81,8 @@ const summonAgentDeclaration: FunctionDeclaration = {
 
 const App: React.FC = () => {
   const [config, setConfig] = useState({
-    supabaseUrl: localStorage.getItem('SUPABASE_URL') || '',
-    supabaseKey: localStorage.getItem('SUPABASE_ANON_KEY') || ''
+    supabaseUrl: typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_URL') || '' : '',
+    supabaseKey: typeof window !== 'undefined' ? localStorage.getItem('SUPABASE_ANON_KEY') || '' : ''
   });
   
   const [showConfig, setShowConfig] = useState(!config.supabaseUrl);
@@ -135,7 +136,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const initSupabaseClient = async () => {
       if (config.supabaseUrl && config.supabaseKey) {
-        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@^2.39.7');
+        const { createClient } = await import('@supabase/supabase-js');
         setSupabase(createClient(config.supabaseUrl, config.supabaseKey));
         pushLog('SYSTEM', 'INFO', 'Matrix Database Link Latched.');
       }
@@ -265,7 +266,7 @@ const App: React.FC = () => {
     const ctx = audioCtxRef.current;
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
       const nextStartTimeRef = { current: 0 };
       const agentSources = new Set<AudioBufferSourceNode>();
       let currentOutputBuffer = "";
@@ -441,222 +442,231 @@ const App: React.FC = () => {
   useEffect(() => {
     let frameId: number;
     const updateIntensity = () => {
-      let maxInt = 0;
-      if (outputAnalyserRef.current) {
-        const data = new Uint8Array(outputAnalyserRef.current.frequencyBinCount);
-        outputAnalyserRef.current.getByteFrequencyData(data);
-        maxInt = Math.max(maxInt, (data.reduce((a, b) => a + b, 0) / data.length) / 128);
+      if (outputAnalyserRef.current || inputAnalyserRef.current) {
+        const arr = new Uint8Array((outputAnalyserRef.current || inputAnalyserRef.current)!.frequencyBinCount);
+        (outputAnalyserRef.current || inputAnalyserRef.current)!.getByteFrequencyData(arr);
+        const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+        setIntensity(avg / 255);
       }
-      if (inputAnalyserRef.current) {
-        const data = new Uint8Array(inputAnalyserRef.current.frequencyBinCount);
-        inputAnalyserRef.current.getByteFrequencyData(data);
-        maxInt = Math.max(maxInt, ((data.reduce((a, b) => a + b, 0) / data.length) / 100) * 0.8);
-      }
-      setIntensity(Math.min(maxInt, 1.2));
       frameId = requestAnimationFrame(updateIntensity);
     };
-    updateIntensity();
+    if (status === ConnectionStatus.CONNECTED) {
+      frameId = requestAnimationFrame(updateIntensity);
+    }
     return () => cancelAnimationFrame(frameId);
-  }, []);
+  }, [status]);
+
+  const handleSaveConfig = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('SUPABASE_URL', config.supabaseUrl);
+      localStorage.setItem('SUPABASE_ANON_KEY', config.supabaseKey);
+      setShowConfig(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#020202] text-white flex flex-col items-center relative overflow-hidden font-inter">
-      <style>{`
-        @keyframes swirl-in {
-          0% { transform: scale(0) rotate(-720deg); opacity: 0; filter: blur(20px); }
-          100% { transform: scale(1) rotate(0deg); opacity: 1; filter: blur(0px); }
-        }
-        @keyframes swirl-out {
-          0% { transform: scale(1) rotate(0deg); opacity: 1; filter: blur(0px); }
-          100% { transform: scale(0) rotate(720deg); opacity: 0; filter: blur(20px); }
-        }
-        @keyframes focus-badge {
-          0%, 100% { opacity: 0.5; transform: translateY(0); }
-          50% { opacity: 1; transform: translateY(-4px); }
-        }
-        .animate-swirl-in { animation: swirl-in 1.2s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
-        .animate-swirl-out { animation: swirl-out 1.2s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
-        .animate-focus-badge { animation: focus-badge 2s infinite ease-in-out; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.05); border-radius: 10px; }
-      `}</style>
-
+    <div className="min-h-screen bg-[#050505] text-white relative overflow-hidden">
+      {/* Config Modal */}
       {showConfig && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-500 overflow-y-auto">
-           <div className="w-full max-w-2xl bg-white/[0.03] border border-white/10 p-10 rounded-[3rem] shadow-2xl space-y-8 relative">
-              <div className="text-center">
-                <h2 className="text-4xl font-outfit font-bold tracking-tight mb-3">Matrix Calibration</h2>
-                <p className="text-white/40 text-sm mb-8">Establish database credentials to manifest neural clusters and persist memory.</p>
-              </div>
-              <div className="space-y-4">
-                <input type="text" value={config.supabaseUrl} onChange={e => setConfig({...config, supabaseUrl: e.target.value})} placeholder="Supabase URL..." className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:ring-2 ring-indigo-500/50 transition-all font-mono text-white" />
-                <input type="password" value={config.supabaseKey} onChange={e => setConfig({...config, supabaseKey: e.target.value})} placeholder="Anon Key..." className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:ring-2 ring-indigo-500/50 transition-all font-mono text-white" />
-                
-                <div className="pt-6 flex flex-col gap-4">
-                  <button onClick={() => { localStorage.setItem('SUPABASE_URL', config.supabaseUrl); localStorage.setItem('SUPABASE_ANON_KEY', config.supabaseKey); setShowConfig(false); }} className="w-full bg-white text-black font-bold py-5 rounded-2xl hover:bg-white/90 transition-all uppercase tracking-[0.2em] text-[10px]">Manifest cluster</button>
-                  <button onClick={() => { setSupabase(null); setShowConfig(false); pushLog('SYSTEM', 'INFO', 'Operating in Local Volatile Mode.'); }} className="w-full bg-transparent text-white/40 hover:text-white hover:bg-white/5 border border-white/10 font-bold py-4 rounded-2xl transition-all uppercase tracking-[0.2em] text-[10px]">Continue in Local Mode</button>
-                </div>
-
-                <p className="text-center text-[9px] text-white/20 px-8 leading-relaxed italic mt-4">Note: Local Mode does not persist transcriptions or sessions between portal reloads.</p>
-              </div>
-           </div>
-        </div>
-      )}
-
-      {view === 'home' ? (
-        <div className="w-full flex flex-col items-center p-8 mt-12 overflow-y-auto">
-          <header className="w-full max-w-7xl flex justify-between items-center mb-16">
-             <div className="flex flex-col">
-                <h1 className="text-4xl font-outfit font-bold tracking-[0.2em] bg-gradient-to-r from-white to-white/40 bg-clip-text text-transparent">PORTALS</h1>
-                <span className="text-[10px] font-bold tracking-[0.4em] opacity-30">Neural Cluster Alpha</span>
-             </div>
-             <div className="flex items-center gap-4">
-               {!supabase && (
-                 <button onClick={() => setShowConfig(true)} className="px-6 py-3 rounded-full border border-white/10 bg-white/5 text-[10px] font-bold uppercase tracking-widest opacity-60 hover:opacity-100 transition-all">Link Database</button>
-               )}
-               <button 
-                  onClick={handleWalletAction}
-                  className={`group relative overflow-hidden px-8 py-3 rounded-full border transition-all duration-500 flex items-center gap-3 ${walletAddress ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
-               >
-                  <div className={`w-2 h-2 rounded-full transition-colors ${walletAddress ? 'bg-indigo-400 animate-pulse shadow-[0_0_10px_#818cf8] group-hover:bg-red-400 group-hover:shadow-[0_0_10px_#f87171]' : 'bg-white/20'}`} />
-                  <span className="text-[10px] font-bold tracking-[0.2em] uppercase">
-                     {walletAddress ? (
-                       <span className="flex items-center gap-2">
-                          <span className="group-hover:hidden">{`${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`}</span>
-                          <span className="hidden group-hover:inline">Disconnect?</span>
-                       </span>
-                     ) : 'Connect Phantom'}
-                  </span>
-               </button>
-             </div>
-          </header>
-
-          <div className="w-full max-w-7xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-20">
-            {AGENTS.map((agent) => (
-              <button key={agent.id} onClick={() => startCluster(agent)} className="group bg-white/[0.02] border border-white/5 p-8 rounded-[2.5rem] flex flex-col items-center transition-all duration-700 hover:bg-white/10 hover:-translate-y-2">
-                <LiquidPortal isListening={false} isSpeaking={false} intensity={0.05} colors={agent.colors} size="sm" />
-                <h2 className="text-xl font-outfit font-bold mb-2 mt-6">{agent.name}</h2>
-                <p className="text-[11px] text-white/40 leading-relaxed text-center line-clamp-2">{agent.description}</p>
-                <div className="mt-8 py-2 px-8 rounded-full bg-white/5 text-[9px] font-bold uppercase tracking-widest group-hover:bg-white/20 transition-all">Awaken</div>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-md w-full shadow-2xl">
+            <h2 className="text-2xl font-bold mb-4 font-outfit">System Configuration</h2>
+            <p className="text-sm text-white/60 mb-6">Connect to your Supabase database to enable session persistence.</p>
+            <input 
+              type="text" 
+              placeholder="Supabase URL" 
+              value={config.supabaseUrl}
+              onChange={(e) => setConfig({...config, supabaseUrl: e.target.value})}
+              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:border-cyan-500 transition"
+            />
+            <input 
+              type="password" 
+              placeholder="Supabase Anon Key" 
+              value={config.supabaseKey}
+              onChange={(e) => setConfig({...config, supabaseKey: e.target.value})}
+              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-6 focus:outline-none focus:border-cyan-500 transition"
+            />
+            <div className="flex gap-3">
+              <button onClick={handleSaveConfig} className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-3 rounded-lg transition">
+                Save & Continue
               </button>
-            ))}
+              <button onClick={() => setShowConfig(false)} className="px-6 bg-white/10 hover:bg-white/20 rounded-lg transition">
+                Skip
+              </button>
+            </div>
           </div>
         </div>
-      ) : (
-        <div className="w-full h-screen flex flex-col p-4 lg:p-8 transition-all animate-in fade-in duration-1000">
-           <header className="w-full max-w-[calc(100%-2rem)] mx-auto flex justify-between items-center mb-8 backdrop-blur-xl bg-white/[0.02] border border-white/10 p-4 rounded-[2.5rem] shrink-0">
-              <div className="flex items-center gap-8 pl-4">
-                <button onClick={terminateAll} className="p-2 opacity-40 hover:opacity-100 transition-all">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                </button>
-                <div className="flex flex-col">
-                  <h2 className="text-2xl font-outfit font-bold">{activeAgent.name} Cluster</h2>
-                  <span className="text-[9px] font-bold uppercase tracking-widest opacity-30 tracking-[0.3em]">{isSyncing ? 'Syncing...' : (walletAddress ? `Secured by ${walletAddress.slice(0, 6)}...` : 'Neural Bridge Active')}</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                 <button onClick={terminateAll} className="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-8 py-3 rounded-full text-[10px] font-bold tracking-[0.2em] border border-red-500/20 transition-all uppercase">Disconnect</button>
-              </div>
-           </header>
-
-           <div className="flex-1 flex flex-col lg:flex-row gap-8 overflow-hidden">
-             {/* Left: Portals Cluster */}
-             <main className="flex-1 flex flex-col items-center justify-center space-y-16 overflow-y-auto lg:overflow-visible">
-                <div className="flex flex-wrap items-center justify-center gap-12 lg:gap-24 min-h-[400px]">
-                  {/* Host Agent */}
-                  <div className="flex flex-col items-center gap-6 cursor-pointer relative" onClick={() => setFocusedAgentId(activeAgent.id)}>
-                     {focusedAgentId === activeAgent.id && (
-                       <div className="absolute -top-12 px-4 py-1.5 rounded-full bg-white/10 border border-white/20 text-[10px] font-bold tracking-[0.3em] text-white/80 animate-focus-badge backdrop-blur-md z-50">
-                         NEURAL FOCUS
-                       </div>
-                     )}
-                     <LiquidPortal 
-                      isListening={status === ConnectionStatus.CONNECTED} 
-                      isSpeaking={speakingAgents.has(activeAgent.id)} 
-                      isFocused={focusedAgentId === activeAgent.id}
-                      intensity={speakingAgents.has(activeAgent.id) ? intensity : 0} 
-                      colors={activeAgent.colors} 
-                      size={collaborators.length > 0 ? "md" : "lg"} 
-                    />
-                    <div className={`text-center font-outfit text-xl font-bold transition-all duration-500 ${focusedAgentId === activeAgent.id ? 'opacity-100 scale-110' : 'opacity-30 grayscale'}`}>{activeAgent.name}</div>
-                  </div>
-
-                  {/* Collaborator Agents */}
-                  {collaborators.map((agent) => (
-                    <div 
-                      key={agent.id} 
-                      onClick={() => setFocusedAgentId(agent.id)}
-                      onDoubleClick={() => removeAgentFromCluster(agent.id)}
-                      className={`flex flex-col items-center gap-6 cursor-pointer relative transition-all duration-700 
-                        ${removingIds.has(agent.id) ? 'animate-swirl-out' : 'animate-swirl-in'}`}
-                    >
-                      {focusedAgentId === agent.id && (
-                        <div className="absolute -top-12 px-4 py-1.5 rounded-full bg-white/10 border border-white/20 text-[10px] font-bold tracking-[0.3em] text-white/80 animate-focus-badge backdrop-blur-md z-50">
-                          NEURAL FOCUS
-                        </div>
-                      )}
-                      <LiquidPortal 
-                        isListening={status === ConnectionStatus.CONNECTED} 
-                        isSpeaking={speakingAgents.has(agent.id)} 
-                        isFocused={focusedAgentId === agent.id}
-                        intensity={speakingAgents.has(agent.id) ? intensity : 0} 
-                        colors={agent.colors} 
-                        size="md" 
-                      />
-                      <div className={`text-center font-outfit text-xl font-bold transition-all duration-500 ${focusedAgentId === agent.id ? 'opacity-100 scale-110' : 'opacity-30 grayscale'}`}>{agent.name}</div>
-                    </div>
-                  ))}
-                </div>
-             </main>
-
-             {/* Right: Transcription Sidebar */}
-             <aside className="w-full lg:w-[450px] shrink-0 bg-white/[0.02] border border-white/10 rounded-[3rem] overflow-hidden backdrop-blur-3xl shadow-2xl flex flex-col h-[400px] lg:h-full">
-                <div className="px-10 py-6 border-b border-white/10 bg-white/[0.02] flex items-center justify-between">
-                   <h3 className="text-[11px] font-bold uppercase tracking-[0.3em] text-white/40">Transcription Feed</h3>
-                   <div className="flex gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <div className="w-1.5 h-1.5 rounded-full bg-white/10" />
-                      <div className="w-1.5 h-1.5 rounded-full bg-white/10" />
-                   </div>
-                </div>
-                <div ref={transcriptionContainerRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
-                   {transcriptions.length === 0 && (
-                      <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-20">
-                         <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                         <p className="text-xs uppercase tracking-widest">Listening for neural signals...</p>
-                      </div>
-                   )}
-                   {transcriptions.map((t, idx) => {
-                     const agent = t.agentId ? AGENTS.find(a => a.id === t.agentId) : null;
-                     return (
-                       <div key={idx} className={`flex flex-col ${t.type === 'user' ? 'items-end' : 'items-start'}`}>
-                         <div className={`max-w-[95%] rounded-[2rem] px-6 py-4 transition-all duration-700 ${t.type === 'user' ? 'bg-white/[0.03] border border-white/5' : 'bg-white/5 border border-white/10 shadow-lg'}`}>
-                           <span className={`block text-[9px] uppercase font-bold tracking-[0.3em] opacity-30 mb-2 ${t.type === 'user' ? 'text-right' : ''}`}>
-                             {t.type === 'user' ? (walletAddress ? `${walletAddress.slice(0,4)}...` : 'User') : (agent?.name || 'Cluster')}
-                           </span>
-                           <p className="leading-relaxed text-[15px] font-light opacity-90">{t.text}</p>
-                         </div>
-                       </div>
-                     );
-                   })}
-                </div>
-             </aside>
-           </div>
-        </div>
       )}
 
-      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-4">
-        <button onClick={() => setShowDebug(!showDebug)} className="bg-white/5 hover:bg-white/10 p-4 rounded-full border border-white/10 transition-all opacity-40 hover:opacity-100 backdrop-blur-xl">
-           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+      {/* Wallet & Debug Header */}
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-6 z-40">
+        <button 
+          onClick={handleWalletAction}
+          className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 backdrop-blur-md border border-white/10 hover:border-white/30 px-6 py-2 rounded-full text-sm font-semibold transition-all"
+        >
+          {walletAddress ? `${walletAddress.slice(0,6)}...${walletAddress.slice(-4)}` : 'Connect Phantom'}
+        </button>
+        <button 
+          onClick={() => setShowDebug(!showDebug)}
+          className="bg-black/40 backdrop-blur-md border border-white/10 hover:border-white/30 p-2 rounded-full transition-all"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
         </button>
       </div>
 
+      {/* Debug Panel */}
       {showDebug && (
-        <div className="fixed bottom-20 right-6 w-[350px] h-[350px] bg-black/95 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] z-[100] flex flex-col overflow-hidden animate-in slide-in-from-bottom-5">
-           <div className="bg-white/5 px-8 py-5 border-b border-white/10 flex justify-between items-center"><span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Neural Logs</span><button onClick={() => setDebugLogs([])} className="text-[10px] opacity-40">Clear</button></div>
-           <div className="flex-1 overflow-y-auto p-6 font-mono text-[9px] space-y-2">
-              {debugLogs.map(log => (<div key={log.id}><span className="text-white/30 mr-2">[{log.type}]</span><span className={log.status === 'ERROR' ? 'text-red-400' : 'text-emerald-400'}>{log.message}</span></div>))}
-           </div>
+        <div className="absolute top-20 right-6 bg-black/90 backdrop-blur-md border border-white/20 rounded-xl p-4 max-w-md max-h-[60vh] overflow-y-auto z-40">
+          <h3 className="text-sm font-bold mb-2 text-cyan-400">System Log</h3>
+          {debugLogs.length === 0 && <p className="text-xs text-white/40">No events logged yet.</p>}
+          {debugLogs.map(log => (
+            <div key={log.id} className={`text-xs mb-2 pb-2 border-b border-white/10 ${
+              log.status === 'ERROR' ? 'text-red-400' : log.status === 'SUCCESS' ? 'text-emerald-400' : 'text-white/60'
+            }`}>
+              <span className="text-white/40">[{log.timestamp}]</span> <span className="font-semibold">{log.type}</span>: {log.message}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* HOME VIEW */}
+      {view === 'home' && (
+        <div className="flex flex-col items-center justify-center min-h-screen relative z-10 px-4">
+          <h1 className="text-6xl md:text-8xl font-bold mb-4 font-outfit bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+            PORTALS
+          </h1>
+          <p className="text-white/60 text-lg mb-12 text-center max-w-md">
+            Summon specialized AI agents into a live, voice-powered collaboration cluster.
+          </p>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl w-full">
+            {AGENTS.map(agent => (
+              <button 
+                key={agent.id}
+                onClick={() => startCluster(agent)}
+                className="group relative bg-gradient-to-br from-white/5 to-white/[0.02] backdrop-blur-sm border border-white/10 hover:border-white/30 rounded-2xl p-6 transition-all hover:scale-105 hover:shadow-2xl overflow-hidden"
+              >
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{background: `radial-gradient(circle at 50% 50%, ${agent.colors.glow}22, transparent)`}} />
+                <div className="relative z-10">
+                  <div className={`w-12 h-12 rounded-full ${agent.colors.primary} mb-4 shadow-lg`} style={{boxShadow: `0 0 30px ${agent.colors.glow}66`}} />
+                  <h3 className="text-xl font-bold mb-2 font-outfit">{agent.name}</h3>
+                  <p className="text-sm text-white/60">{agent.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+          
+          <button 
+            onClick={() => setShowConfig(true)}
+            className="mt-12 text-sm text-white/40 hover:text-white/80 transition underline"
+          >
+            Configure Database
+          </button>
+        </div>
+      )}
+
+      {/* PORTAL VIEW */}
+      {view === 'portal' && (
+        <div className="flex flex-col lg:flex-row min-h-screen">
+          {/* Left Sidebar - Cluster Control */}
+          <div className="w-full lg:w-80 bg-black/40 backdrop-blur-md border-r border-white/10 p-6 flex flex-col">
+            <button 
+              onClick={terminateAll}
+              className="mb-6 w-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 font-semibold py-3 rounded-lg transition"
+            >
+              ← Disconnect Cluster
+            </button>
+
+            <div className="mb-6">
+              <h3 className="text-sm font-bold text-white/60 mb-3 uppercase tracking-wider">Active Host</h3>
+              <div className={`p-4 rounded-xl border-2 ${speakingAgents.has(activeAgent.id) ? 'animate-pulse' : ''}`} style={{borderColor: activeAgent.colors.glow}}>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={`w-3 h-3 rounded-full ${activeAgent.colors.primary}`} style={{boxShadow: `0 0 10px ${activeAgent.colors.glow}`}} />
+                  <span className="font-bold">{activeAgent.name}</span>
+                </div>
+                <p className="text-xs text-white/50">{activeAgent.description}</p>
+              </div>
+            </div>
+
+            {collaborators.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-bold text-white/60 mb-3 uppercase tracking-wider">Collaborators</h3>
+                <div className="space-y-2">
+                  {collaborators.map(collab => (
+                    <div 
+                      key={collab.id} 
+                      className={`p-3 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between ${removingIds.has(collab.id) ? 'opacity-30 scale-95' : ''} ${speakingAgents.has(collab.id) ? 'animate-pulse' : ''} transition-all`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${collab.colors.primary}`} style={{boxShadow: `0 0 8px ${collab.colors.glow}`}} />
+                        <span className="text-sm font-semibold">{collab.name}</span>
+                      </div>
+                      <button 
+                        onClick={() => removeAgentFromCluster(collab.id)}
+                        className="text-white/40 hover:text-red-400 text-xs transition"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-auto">
+              <div className={`text-xs uppercase tracking-wider font-semibold ${isSyncing ? 'text-cyan-400' : status === ConnectionStatus.CONNECTED ? 'text-emerald-400' : 'text-white/40'}`}>
+                {isSyncing ? '⟳ Syncing...' : status === ConnectionStatus.CONNECTED ? '● Live' : '○ Idle'}
+              </div>
+            </div>
+          </div>
+
+          {/* Center - Portal Visualization */}
+          <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
+            <div className="mb-8">
+              <LiquidPortal 
+                isListening={status === ConnectionStatus.CONNECTED}
+                isSpeaking={speakingAgents.has(focusedAgentId || activeAgent.id)}
+                isFocused={true}
+                intensity={intensity}
+                colors={AGENTS.find(a => a.id === focusedAgentId)?.colors || activeAgent.colors}
+                size="lg"
+              />
+            </div>
+
+            {focusedAgentId && (
+              <div className="text-center">
+                <h2 className="text-3xl font-bold font-outfit mb-2">
+                  {AGENTS.find(a => a.id === focusedAgentId)?.name}
+                </h2>
+                <p className="text-white/60 text-sm">
+                  {AGENTS.find(a => a.id === focusedAgentId)?.description}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Right Sidebar - Transcription */}
+          <div className="w-full lg:w-96 bg-black/40 backdrop-blur-md border-l border-white/10 p-6 flex flex-col">
+            <h3 className="text-sm font-bold text-white/60 mb-4 uppercase tracking-wider">Live Transcription</h3>
+            <div ref={transcriptionContainerRef} className="flex-1 overflow-y-auto space-y-3 pr-2">
+              {transcriptions.length === 0 && (
+                <p className="text-white/30 text-sm">Waiting for conversation...</p>
+              )}
+              {transcriptions.map((item, idx) => (
+                <div 
+                  key={idx} 
+                  className={`p-3 rounded-lg ${item.type === 'user' ? 'bg-white/5 ml-4' : 'bg-blue-500/10 mr-4'}`}
+                >
+                  <div className="text-xs text-white/50 mb-1">
+                    {item.type === 'user' ? 'You' : AGENTS.find(a => a.id === item.agentId)?.name || 'Agent'}
+                  </div>
+                  <div className="text-sm">{item.text}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
