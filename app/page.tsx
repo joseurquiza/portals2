@@ -169,9 +169,6 @@ const App: React.FC = () => {
   const [roundtableDbId, setRoundtableDbId] = useState<string | null>(null);
   const [isDiscussionRunning, setIsDiscussionRunning] = useState(false);
   const [shouldStopDiscussion, setShouldStopDiscussion] = useState(false);
-  const [pastSessions, setPastSessions] = useState<any[]>([]);
-  const [showSessionHistory, setShowSessionHistory] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<any | null>(null);
   
   const [agentPersonalities, setAgentPersonalities] = useState<AgentPersonality[]>(
     AGENTS.map(agent => ({ agentId: agent.id, presetId: 'default', customTraits: '' }))
@@ -306,72 +303,7 @@ const App: React.FC = () => {
       console.log('[v0] Loaded', docs.length, 'documents');
     }
     
-    // Load user's past roundtable sessions
-    await loadPastSessions(walletAddr);
-    
     pushLog('SYSTEM', 'INFO', 'Loaded your personal workspace');
-  };
-  
-  const loadPastSessions = async (walletAddr?: string) => {
-    if (!supabase) return;
-    
-    const address = walletAddr || walletAddress;
-    if (!address) return;
-    
-    console.log('[v0] Loading past sessions for:', address);
-    
-    const { data: sessions } = await supabase
-      .from('roundtable_sessions')
-      .select(`
-        id,
-        topic,
-        status,
-        summary,
-        start_time,
-        end_time,
-        created_at,
-        user_roundtable_sessions!inner(wallet_address)
-      `)
-      .eq('user_roundtable_sessions.wallet_address', address)
-      .order('created_at', { ascending: false })
-      .limit(20);
-    
-    if (sessions) {
-      setPastSessions(sessions);
-      console.log('[v0] Loaded', sessions.length, 'past sessions');
-    }
-  };
-  
-  const viewSessionDetails = async (sessionId: string) => {
-    if (!supabase) return;
-    
-    console.log('[v0] Loading session details:', sessionId);
-    
-    // Load full session with research and discussions
-    const { data: session } = await supabase
-      .from('roundtable_sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .single();
-    
-    const { data: research } = await supabase
-      .from('roundtable_research')
-      .select('*')
-      .eq('session_id', sessionId);
-    
-    const { data: discussions } = await supabase
-      .from('roundtable_discussions')
-      .select('*')
-      .eq('session_id', sessionId)
-      .order('created_at', { ascending: true });
-    
-    if (session) {
-      setSelectedSession({
-        ...session,
-        research: research || [],
-        discussions: discussions || []
-      });
-    }
   };
 
   const disconnectWallet = async () => {
@@ -1372,128 +1304,354 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                 >
                   Upload Company Data
                 </button>
-                {walletAddress && pastSessions.length > 0 && (
-                  <button 
-                    onClick={() => setShowSessionHistory(true)}
-                    className="px-8 py-4 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 hover:border-blue-500/50 text-blue-300 font-semibold rounded-xl transition-all backdrop-blur-sm"
-                  >
-                    Past Meetings ({pastSessions.length})
-                  </button>
-              )}
-            </div>
-          </div>
-          
-          {/* Session History Modal */}
-          {showSessionHistory && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-gradient-to-br from-slate-900 to-black border border-white/10 rounded-3xl p-8 max-w-4xl w-full max-h-[80vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-bold font-outfit">Past Board Meetings</h2>
-                  <button
-                    onClick={() => {
-                      setShowSessionHistory(false);
-                      setSelectedSession(null);
-                    }}
-                    className="text-white/50 hover:text-white text-2xl"
-                  >
-                    ×
-                  </button>
-                </div>
-                
-                {!selectedSession ? (
-                  <div className="space-y-3">
-                    {pastSessions.map((session) => (
-                      <div
-                        key={session.id}
-                        onClick={() => viewSessionDetails(session.id)}
-                        className="bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl p-4 cursor-pointer transition-all"
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-semibold text-lg">{session.topic}</h3>
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            session.status === 'complete' ? 'bg-green-500/20 text-green-400' :
-                            session.status === 'stopped' ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-blue-500/20 text-blue-400'
-                          }`}>
-                            {session.status}
-                          </span>
-                        </div>
-                        <p className="text-white/60 text-sm">
-                          {new Date(session.created_at).toLocaleDateString()} at {new Date(session.created_at).toLocaleTimeString()}
-                        </p>
-                        {session.summary && (
-                          <p className="text-white/70 text-sm mt-2 line-clamp-2">{session.summary}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div>
-                    <button
-                      onClick={() => setSelectedSession(null)}
-                      className="text-blue-400 hover:text-blue-300 mb-4 text-sm"
-                    >
-                      ← Back to list
-                    </button>
-                    
-                    <div className="space-y-6">
-                      <div>
-                        <h3 className="text-xl font-bold mb-2">{selectedSession.topic}</h3>
-                        <p className="text-white/60 text-sm">
-                          {new Date(selectedSession.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                      
-                      {selectedSession.research && selectedSession.research.length > 0 && (
-                        <div>
-                          <h4 className="font-semibold mb-3">Research Findings</h4>
-                          <div className="grid gap-3">
-                            {selectedSession.research.map((r: any) => (
-                              <div key={r.id} className="bg-white/5 border border-white/10 rounded-lg p-3">
-                                <div className="font-semibold text-sm mb-1">{r.agent_name}</div>
-                                <p className="text-white/70 text-sm">{r.findings}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {selectedSession.discussions && selectedSession.discussions.length > 0 && (
-                        <div>
-                          <h4 className="font-semibold mb-3">Discussion ({selectedSession.discussions.length} exchanges)</h4>
-                          <div className="space-y-2 max-h-96 overflow-y-auto">
-                            {selectedSession.discussions.map((d: any) => (
-                              <div key={d.id} className="bg-white/5 border-l-4 border-l-blue-500/50 rounded-lg p-3">
-                                <div className="font-semibold text-sm mb-1">{d.from_agent_name}</div>
-                                <p className="text-white/70 text-sm">{d.message}</p>
-                                <p className="text-white/40 text-xs mt-1">
-                                  {new Date(d.created_at).toLocaleTimeString()}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {selectedSession.summary && (
-                        <div>
-                          <h4 className="font-semibold mb-3">Summary</h4>
-                          <div className="bg-white/5 border border-white/10 rounded-lg p-4">
-                            <p className="text-white/80">{selectedSession.summary}</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
-          )}
-        </main>
-      </div>
-    </div>
-  );
-}
+            
+            {/* Agent Cards */}
+            <div className="max-w-7xl w-full px-4">
+              <div className="text-center mb-12">
+                <h2 className="text-3xl md:text-4xl font-bold mb-4 font-outfit">Meet Your Board Members</h2>
+                <p className="text-white/60 text-lg">Click any advisor to start a live voice session</p>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                {AGENTS.map((agent, idx) => (
+                  <button 
+                    key={agent.id}
+                    onClick={() => startCluster(agent)}
+                    className="group relative bg-gradient-to-b from-white/[0.07] to-white/[0.02] backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-2xl p-8 transition-all hover:-translate-y-2 hover:shadow-2xl overflow-hidden"
+                    style={{
+                      animationDelay: `${idx * 100}ms`,
+                      animation: 'fadeInUp 0.6s ease-out forwards',
+                      opacity: 0
+                    }}
+                  >
+                    {/* Glow Effect */}
+                    <div 
+                      className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700" 
+                      style={{background: `radial-gradient(circle at 50% 0%, ${agent.colors.glow}15, transparent 70%)`}} 
+                    />
+                    
+                    {/* Content */}
+                    <div className="relative z-10 flex flex-col items-center text-center">
+                      <div 
+                        className={`w-20 h-20 rounded-2xl ${agent.colors.primary} mb-6 shadow-lg transition-transform group-hover:scale-110 group-hover:rotate-3 flex items-center justify-center`} 
+                        style={{boxShadow: `0 10px 40px ${agent.colors.glow}40`}}
+                      >
+                        <span className="text-3xl">
+                          {agent.id === 'oracle' && '🔮'}
+                          {agent.id === 'architect' && '🏗️'}
+                          {agent.id === 'ledger' && '💰'}
+                          {agent.id === 'muse' && '🎨'}
+                          {agent.id === 'sentinel' && '🛡️'}
+                        </span>
+                      </div>
+                      <h3 className="text-2xl font-bold mb-3 font-outfit group-hover:text-white transition-colors">{agent.name}</h3>
+                      <p className="text-sm text-white/60 leading-relaxed mb-4">{agent.description}</p>
+                      <div className="flex items-center gap-2 text-xs text-white/40">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span>Available now</span>
+                      </div>
+                    </div>
+                    
+                    {/* Hover Arrow */}
+                    <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                      <svg className="w-5 h-5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                      </svg>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {/* Quick Actions */}
+            <div className="mt-20 flex flex-wrap gap-6 justify-center text-sm">
+              <button 
+                onClick={() => setShowPersonalityEditor(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all group"
+              >
+                <span className="text-white/70 group-hover:text-white transition-colors">⚙️ Customize Personalities</span>
+              </button>
+              <button 
+                onClick={() => setShowKnowledgeBase(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all group"
+              >
+                <span className="text-white/70 group-hover:text-white transition-colors">📚 Knowledge Base</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Roundtable Input Modal */}
+      {showRoundtableInput && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-2xl w-full shadow-2xl">
+            <h2 className="text-2xl font-bold mb-4 font-outfit">Start a Roundtable Discussion</h2>
+            <p className="text-sm text-white/60 mb-6">
+              All five agents will research your topic, discuss their findings with each other, and provide a comprehensive summary.
+            </p>
+            <textarea
+              placeholder="Enter your topic or question..."
+              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-6 h-32 focus:outline-none focus:border-cyan-500 transition resize-none"
+              id="roundtable-topic"
+            />
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  const input = document.getElementById('roundtable-topic') as HTMLTextAreaElement;
+                  if (input?.value.trim()) startRoundtable(input.value);
+                }}
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold py-3 rounded-lg transition"
+              >
+                Begin Roundtable
+              </button>
+              <button 
+                onClick={() => setShowRoundtableInput(false)}
+                className="px-6 bg-white/10 hover:bg-white/20 rounded-lg transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Personality Editor Modal */}
+      {showPersonalityEditor && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-5xl w-full shadow-2xl my-8">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold font-outfit">Customize Agent Personalities</h2>
+                <p className="text-sm text-white/60 mt-1">
+                  Give each agent a unique thinking style or persona
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowPersonalityEditor(false);
+                  setEditingAgentId(null);
+                }}
+                className="text-white/60 hover:text-white transition text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {AGENTS.map(agent => {
+                const personality = agentPersonalities.find(p => p.agentId === agent.id);
+                const preset = PERSONALITY_PRESETS.find(p => p.id === personality?.presetId);
+                const isEditing = editingAgentId === agent.id;
+
+                return (
+                  <div 
+                    key={agent.id}
+                    className="bg-white/5 border border-white/10 rounded-xl p-4 hover:border-white/20 transition"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div 
+                        className={`w-3 h-3 rounded-full ${agent.colors.primary}`}
+                        style={{boxShadow: `0 0 10px ${agent.colors.glow}`}}
+                      />
+                      <span className="font-bold">{agent.name}</span>
+                    </div>
+                    
+                    <select
+                      value={personality?.presetId || 'default'}
+                      onChange={(e) => {
+                        setAgentPersonalities(prev => 
+                          prev.map(p => 
+                            p.agentId === agent.id 
+                              ? { ...p, presetId: e.target.value, customTraits: '' }
+                              : p
+                          )
+                        );
+                      }}
+                      className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 mb-2 text-sm focus:outline-none focus:border-cyan-500 transition"
+                    >
+                      {PERSONALITY_PRESETS.map(preset => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </option>
+                      ))}
+                    </select>
+                    
+                    <p className="text-xs text-white/50 mb-3 h-8">
+                      {preset?.description}
+                    </p>
+                    
+                    {/* Research Real Person */}
+                    {editingAgentId === agent.id && (
+                      <div className="mb-3 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                        <label className="text-xs text-purple-300 font-semibold block mb-2">
+                          Research Real Person
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={personResearchName}
+                            onChange={(e) => setPersonResearchName(e.target.value)}
+                            placeholder="e.g., Peter Thiel, Elon Musk..."
+                            className="flex-1 bg-white/10 border border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500 transition"
+                            disabled={researchingPerson}
+                          />
+        <button
+          onClick={connectWallet}
+          disabled={!!walletAddress}
+          className={`backdrop-blur-md border px-6 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-2 ${
+            walletAddress 
+              ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30' 
+              : 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-white/10 hover:border-white/30'
+          }`}
+          >
+          {walletAddress && <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />}
+          {walletAddress ? `Your Space: ${walletAddress.slice(0,4)}...${walletAddress.slice(-4)}` : 'Connect Phantom'}
+        </button>
+                        </div>
+                        <p className="text-xs text-white/40 mt-1">
+                          AI will deeply research this person's decision-making style and board behavior
+                        </p>
+                      </div>
+                    )}
+
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={personality?.customTraits || ''}
+                          onChange={(e) => {
+                            setAgentPersonalities(prev => 
+                              prev.map(p => 
+                                p.agentId === agent.id 
+                                  ? { ...p, customTraits: e.target.value }
+                                  : p
+                              )
+                            );
+                          }}
+                          placeholder="Add custom personality traits..."
+                          className="w-full bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-xs h-24 focus:outline-none focus:border-cyan-500 transition resize-none"
+                        />
+                        <button
+                          onClick={() => setEditingAgentId(null)}
+                          className="w-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-400 text-xs py-1.5 rounded transition"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEditingAgentId(agent.id)}
+                        className="w-full bg-white/5 hover:bg-white/10 border border-white/20 text-white/70 text-xs py-1.5 rounded transition"
+                      >
+                        {personality?.customTraits ? 'Edit Custom Traits' : 'Add Custom Traits'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => {
+                  setAgentPersonalities(AGENTS.map(agent => ({ 
+                    agentId: agent.id, 
+                    presetId: 'default', 
+                    customTraits: '' 
+                  })));
+                }}
+                className="px-6 bg-white/5 hover:bg-white/10 border border-white/20 rounded-lg py-2 transition text-sm"
+              >
+                Reset All
+              </button>
+              <button
+                onClick={() => {
+                  setShowPersonalityEditor(false);
+                  setEditingAgentId(null);
+                }}
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold py-2 rounded-lg transition"
+              >
+                Save & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Knowledge Base Modal */}
+      {showKnowledgeBase && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-4xl w-full shadow-2xl my-8">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold font-outfit">Company Knowledge Base</h2>
+                <p className="text-sm text-white/60 mt-1">
+                  Upload documents, PDFs, spreadsheets, and images. Agents can search and reference them during conversations.
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowKnowledgeBase(false)}
+                className="text-white/60 hover:text-white transition text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Upload Progress */}
+            {uploadProgress.length > 0 && (
+              <div className="mb-6 space-y-2 bg-white/5 rounded-xl p-4 border border-white/10">
+                <div className="text-sm font-semibold mb-3">Upload Progress</div>
+                {uploadProgress.map((item, idx) => (
+                  <div key={idx} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/70 truncate max-w-[200px]">{item.filename}</span>
+                      <span className={`font-semibold ${
+                        item.status === 'complete' ? 'text-emerald-400' :
+                        item.status === 'error' ? 'text-red-400' :
+                        'text-cyan-400'
+                      }`}>
+                        {item.status === 'checking' && 'Checking...'}
+                        {item.status === 'uploading' && 'Uploading...'}
+                        {item.status === 'complete' && '✓ Complete'}
+                        {item.status === 'error' && '✗ Failed'}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ${
+                          item.status === 'complete' ? 'bg-emerald-400' :
+                          item.status === 'error' ? 'bg-red-400' :
+                          'bg-cyan-400'
+                        }`}
+                        style={{width: `${item.progress}%`}}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Upload Area */}
+            <div className="border-2 border-dashed border-white/20 rounded-xl p-8 mb-6 hover:border-cyan-500/50 transition">
+              <input
+                type="file"
+                id="knowledge-upload"
+                multiple
+                accept=".pdf,.txt,.md,.doc,.docx,.csv,.xlsx,.png,.jpg,.jpeg"
+                className="hidden"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (files.length === 0) return;
+                  
+                  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || localStorage.getItem('SUPABASE_URL');
+                  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || localStorage.getItem('SUPABASE_ANON_KEY');
+                  
+                  if (!supabaseUrl || !supabaseKey) {
+                    pushLog('SYSTEM', 'ERROR', 'Database not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in environment or localStorage.');
+                    return;
+                  }
                   
                   const { createClient } = await import('@supabase/supabase-js');
                   const supabase = createClient(supabaseUrl, supabaseKey);
