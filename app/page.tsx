@@ -789,49 +789,29 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
       const personalityPreset = PERSONALITY_PRESETS.find(p => p.id === personality?.presetId);
       const personalityTraits = personality?.customTraits || personalityPreset?.traits || '';
       
-      const systemInstruction = `You are ${agent.name}, ${agent.description}
+      const systemInstruction = `You are ${agent.name}, a board member with expertise in ${agent.description}.
 
-ROUNDTABLE DISCUSSION: "${roundtableSession?.topic}"
+You are in a live board discussion about: "${roundtableSession?.topic}"
 
-YOUR RESEARCH FINDINGS:
-${agentResearch?.findings}
+Your research findings: ${agentResearch?.findings}
 
-ALL BOARD RESEARCH:
-${allResearch}
+${personalityTraits ? `Your personality and style: ${personalityTraits}\n\n` : ''}
 
-${personalityTraits ? `PERSONALITY: ${personalityTraits}\n\n` : ''}
+Other board members: ${AGENTS.filter(a => a.id !== agent.id).map(a => a.name).join(', ')}
 
-DISCUSSION PROTOCOL:
-1. You WILL actively participate in this live discussion
-2. ${agent.id === 'oracle' ? 'As Chairman, you lead the discussion and should speak first to introduce the topic' : `Wait for the Chairman to introduce the topic, then contribute when it's relevant to your expertise`}
-3. When someone addresses you by name, respond directly
-4. Keep responses concise (15-30 seconds of speaking)
-   - Someone asks a question related to your expertise area
-   
-2. When you DO speak:
-   - Keep it to ONE brief point (1-2 sentences max)
-   - Then STOP and listen for others
-   
-3. Active listening:
-   - When others are speaking, stay SILENT
-   - Let at least 2 other board members speak before you speak again
-   - Don't repeat what others have already said
-   
-4. Board members present: ${AGENTS.filter(a => a.id !== agent.id).map(a => a.name).join(', ')}
+HOW TO PARTICIPATE:
+- You will receive messages showing what other board members say in real-time
+- When you receive a message, respond naturally if:
+  * Someone addresses you by name
+  * The topic relates to your expertise (${agent.description})
+  * You have a relevant insight to add
+- Keep responses conversational and brief (1-3 sentences)
+- Speak directly to the board: "I think...", "The key issue is...", "${AGENTS[0].name}, regarding..."
+- NO INTERNAL MONOLOGUE: Never say "I'm analyzing", "I'm observing", "I'm formulating"
 
-5. Your role is ${agent.description} - only speak when this expertise is needed
+${agent.id === 'oracle' ? 'As Chairman, you will open the discussion. Introduce the topic and your perspective, then invite others to contribute.' : 'Listen to what others say and contribute when relevant to your expertise.'}
 
-EXAMPLE GOOD BEHAVIOR:
-- Chairman opens → You LISTEN
-- CTO speaks about tech → You LISTEN  
-- Someone says "${agent.name}, what's your take?" → NOW you respond briefly
-- You finish → STOP and LISTEN for others
-
-FORBIDDEN: 
-- Speaking multiple times in a row
-- Dominating the conversation
-- Speaking when not addressed
-- Repeating similar points`;
+SPEAK NATURALLY. BE DIRECT. BE BRIEF.`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -899,14 +879,14 @@ FORBIDDEN:
                 });
               }
               
-              // Broadcast transcript to all other agents so they know what was said
+              // Broadcast to other agents as natural dialogue
               for (const [otherId, sessionObj] of sessionsRef.current.entries()) {
                 if (otherId !== agent.id) {
                   const otherSession = await sessionObj.promise;
+                  // Send as if it's someone speaking in the room
                   otherSession.sendRealtimeInput({
-                    text: `[${agent.name} just said: "${textContent}"]`
+                    text: `${agent.name} says: "${textContent}"`
                   });
-                  console.log(`[v0] Sent transcript to ${AGENTS.find(a => a.id === otherId)?.name}`);
                 }
               }
             }
@@ -951,28 +931,12 @@ FORBIDDEN:
     const chairmanSessionObj = sessionsRef.current.get('oracle');
     if (chairmanSessionObj) {
       const chairmanSession = await chairmanSessionObj.promise;
-      // Send a user message to trigger the Chairman to speak
+      // Simple trigger for Chairman to open
       chairmanSession.sendRealtimeInput({
-        text: `START THE BOARD DISCUSSION NOW. Welcome everyone and introduce the topic: "${roundtableSession.topic}". Share your opening perspective as Chairman based on your research, then invite others to contribute. BEGIN SPEAKING NOW.`
+        text: `Please open the board meeting and introduce the topic.`
       });
       
-      console.log('[v0] Discussion prompt sent to Chairman');
-      
-      // After Chairman speaks, prompt each board member to contribute
-      setTimeout(async () => {
-        for (const agent of AGENTS.slice(1)) { // Skip Chairman (first agent)
-          const agentSessionObj = sessionsRef.current.get(agent.id);
-          if (agentSessionObj) {
-            setTimeout(async () => {
-              const agentSession = await agentSessionObj.promise;
-              agentSession.sendRealtimeInput({
-                text: `${agent.name}, please share your perspective on "${roundtableSession.topic}" based on your research and expertise in ${agent.description}. Contribute to the discussion now.`
-              });
-              console.log(`[v0] Prompted ${agent.name} to contribute`);
-            }, AGENTS.indexOf(agent) * 15000); // Stagger by 15 seconds each
-          }
-        }
-      }, 20000); // Start prompting others after 20 seconds
+      console.log('[v0] Chairman prompted to open discussion');
     }
   };
   
