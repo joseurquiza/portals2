@@ -821,9 +821,11 @@ SPEAK NATURALLY. BE DIRECT. BE BRIEF.`;
             pushLog('SYSTEM', 'SUCCESS', `${agent.name} joined discussion`);
           },
           onmessage: async (message: LiveServerMessage) => {
+            console.log(`[v0] ${agent.name} received message:`, JSON.stringify(message).slice(0, 200));
+            
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64Audio) {
-              console.log(`[v0] ${agent.name} speaking...`);
+              console.log(`[v0] ${agent.name} speaking... (audio length: ${base64Audio.length})`);
               setSpeakingAgents(prev => new Set(prev).add(agent.id));
               setFocusedAgentId(agent.id);
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
@@ -930,13 +932,20 @@ SPEAK NATURALLY. BE DIRECT. BE BRIEF.`;
     console.log('[v0] Chairman initiating discussion...');
     const chairmanSessionObj = sessionsRef.current.get('oracle');
     if (chairmanSessionObj) {
-      const chairmanSession = await chairmanSessionObj.promise;
-      // Simple trigger for Chairman to open
-      chairmanSession.sendRealtimeInput({
-        text: `Please open the board meeting and introduce the topic.`
-      });
-      
-      console.log('[v0] Chairman prompted to open discussion');
+      try {
+        const chairmanSession = await chairmanSessionObj.promise;
+        console.log('[v0] Chairman session resolved, sending prompt...');
+        // Simple trigger for Chairman to open
+        const result = chairmanSession.sendRealtimeInput({
+          text: `Please open the board meeting and introduce the topic: "${roundtableSession.topic}". Speak now.`
+        });
+        console.log('[v0] sendRealtimeInput result:', result);
+        console.log('[v0] Prompt sent to Chairman successfully');
+      } catch (error) {
+        console.error('[v0] Error sending prompt to Chairman:', error);
+      }
+    } else {
+      console.error('[v0] Chairman session not found!');
     }
   };
   
