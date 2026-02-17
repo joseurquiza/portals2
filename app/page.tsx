@@ -688,17 +688,14 @@ const App: React.FC = () => {
   const conductResearch = async (topic: string) => {
     console.log('[v0] RESEARCH PHASE STARTED');
     console.log('[v0] Topic:', topic);
-    pushLog('SYSTEM', 'INFO', 'All agents researching topic...');
+    pushLog('SYSTEM', 'INFO', 'All agents researching in parallel...');
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
-    // Research agents sequentially to show live progress
-    for (let i = 0; i < AGENTS.length; i++) {
-      const agent = AGENTS[i];
-      console.log(`[v0] [${i + 1}/${AGENTS.length}] ${agent.name} starting research...`);
+    // All agents research simultaneously
+    const researchPromises = AGENTS.map(async (agent) => {
+      console.log(`[v0] ${agent.name} starting research...`);
       
       try {
-        // Mark as actively researching
-        setFocusedAgentId(agent.id);
         pushLog('SYSTEM', 'INFO', `${agent.name} researching...`);
         
         const prompt = `You are ${agent.name}. ${agent.description}
@@ -715,36 +712,26 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
         const findings = result.text || 'No findings available';
         console.log(`[v0] ${agent.name} - Research complete:`, findings.substring(0, 100) + '...');
         
-        setRoundtableSession(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            research: prev.research.map(r => 
-              r.agentId === agent.id 
-                ? { ...r, findings, status: 'complete' as const }
-                : r
-            )
-          };
-        });
-        
         pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
-        console.log(`[v0] ${agent.name} research saved`);
+        return { agentId: agent.id, findings, status: 'complete' as const };
       } catch (e: any) {
         console.error(`[v0] ${agent.name} research failed:`, e);
         pushLog('SYSTEM', 'ERROR', `${agent.name} research failed: ${e.message}`);
-        setRoundtableSession(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            research: prev.research.map(r => 
-              r.agentId === agent.id 
-                ? { ...r, findings: 'Research unavailable', status: 'complete' as const }
-                : r
-            )
-          };
-        });
+        return { agentId: agent.id, findings: 'Research unavailable', status: 'complete' as const };
       }
-    }
+    });
+    
+    // Wait for all research to complete
+    const results = await Promise.all(researchPromises);
+    
+    // Update session with all research results
+    setRoundtableSession(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        research: results
+      };
+    });
     
     console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
     setFocusedAgentId(null);
