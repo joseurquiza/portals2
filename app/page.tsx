@@ -713,11 +713,11 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
         console.log(`[v0] ${agent.name} - Research complete:`, findings.substring(0, 100) + '...');
         
         pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
-        return { agentId: agent.id, findings, status: 'complete' as const };
+        return { agentId: agent.id, findings, status: 'complete' as const, timestamp: Date.now() };
       } catch (e: any) {
         console.error(`[v0] ${agent.name} research failed:`, e);
         pushLog('SYSTEM', 'ERROR', `${agent.name} research failed: ${e.message}`);
-        return { agentId: agent.id, findings: 'Research unavailable', status: 'complete' as const };
+        return { agentId: agent.id, findings: 'Research unavailable', status: 'complete' as const, timestamp: Date.now() };
       }
     });
     
