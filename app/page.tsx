@@ -256,12 +256,36 @@ const App: React.FC = () => {
   }, [pushLog]);
 
   const connectWallet = async () => {
+    console.log('[v0] Attempting to connect to Phantom wallet...');
     try {
-      if (typeof window !== 'undefined' && (window as any).phantom?.solana) {
-        const phantom = (window as any).phantom.solana;
-        const response = await phantom.connect();
-        const address = response.publicKey.toString();
-        setWalletAddress(address);
+      if (typeof window === 'undefined') {
+        throw new Error('Window is undefined - not in browser context');
+      }
+      
+      const solana = (window as any).solana || (window as any).phantom?.solana;
+      console.log('[v0] Solana provider check:', { 
+        hasSolana: !!(window as any).solana, 
+        hasPhantom: !!(window as any).phantom,
+        isPhantom: solana?.isPhantom 
+      });
+      
+      if (!solana) {
+        pushLog('SYSTEM', 'ERROR', 'Phantom wallet not detected. Please install Phantom extension.');
+        window.open('https://phantom.app/', '_blank');
+        return;
+      }
+      
+      if (!solana.isPhantom) {
+        pushLog('SYSTEM', 'ERROR', 'Not a Phantom wallet');
+        return;
+      }
+      
+      console.log('[v0] Calling phantom.connect()...');
+      const response = await solana.connect();
+      console.log('[v0] Connect response:', response);
+      
+      const address = response.publicKey.toString();
+      setWalletAddress(address);
         
         // Create or get user profile
         if (supabase) {
