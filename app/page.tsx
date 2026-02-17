@@ -688,17 +688,14 @@ const App: React.FC = () => {
   const conductResearch = async (topic: string) => {
     console.log('[v0] RESEARCH PHASE STARTED');
     console.log('[v0] Topic:', topic);
-    pushLog('SYSTEM', 'INFO', 'All agents researching topic...');
+    pushLog('SYSTEM', 'INFO', 'All agents researching in parallel...');
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
-    // Research agents sequentially to show live progress
-    for (let i = 0; i < AGENTS.length; i++) {
-      const agent = AGENTS[i];
-      console.log(`[v0] [${i + 1}/${AGENTS.length}] ${agent.name} starting research...`);
+    // All agents research simultaneously
+    const researchPromises = AGENTS.map(async (agent) => {
+      console.log(`[v0] ${agent.name} starting research...`);
       
       try {
-        // Mark as actively researching
-        setFocusedAgentId(agent.id);
         pushLog('SYSTEM', 'INFO', `${agent.name} researching...`);
         
         const prompt = `You are ${agent.name}. ${agent.description}
@@ -709,56 +706,49 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
 
         console.log(`[v0] ${agent.name} - Sending research prompt to Gemini...`);
         const result = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-2.0-flash-exp',
           contents: prompt
         });
         const findings = result.text || 'No findings available';
         console.log(`[v0] ${agent.name} - Research complete:`, findings.substring(0, 100) + '...');
         
-        setRoundtableSession(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            research: prev.research.map(r => 
-              r.agentId === agent.id 
-                ? { ...r, findings, status: 'complete' as const }
-                : r
-            )
-          };
-        });
-        
         pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
-        console.log(`[v0] ${agent.name} research saved`);
+        return { agentId: agent.id, findings, status: 'complete' as const, timestamp: Date.now() };
       } catch (e: any) {
         console.error(`[v0] ${agent.name} research failed:`, e);
         pushLog('SYSTEM', 'ERROR', `${agent.name} research failed: ${e.message}`);
-        setRoundtableSession(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            research: prev.research.map(r => 
-              r.agentId === agent.id 
-                ? { ...r, findings: 'Research unavailable', status: 'complete' as const }
-                : r
-            )
-          };
-        });
+        return { agentId: agent.id, findings: 'Research unavailable', status: 'complete' as const, timestamp: Date.now() };
       }
-    }
+    });
+    
+    // Wait for all research to complete
+    const results = await Promise.all(researchPromises);
+    
+    // Update session with all research results
+    setRoundtableSession(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        research: results
+      };
+    });
     
     console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
     setFocusedAgentId(null);
     
     // Save research to database with queries
     if (roundtableDbId && supabase && roundtableSession) {
-      console.log('[v0] Saving research to database...');
+      console.log('[v0] Saving research to database...', {
+        sessionId: roundtableDbId,
+        researchCount: roundtableSession.research.length
+      });
       try {
         for (const research of roundtableSession.research) {
           const agent = AGENTS.find(a => a.id === research.agentId);
-          // Reconstruct the query that was used
           const query = `You are ${agent?.name}. ${agent?.description}\n\nResearch this topic from your unique perspective: "${roundtableSession.topic}"\n\nProvide your key findings in 2-3 sentences. Focus on insights relevant to your specialty.`;
           
-          await supabase.from('roundtable_research').insert({
+          console.log('[v0] Inserting research for:', agent?.name);
+          const { data, error } = await supabase.from('roundtable_research').insert({
             session_id: roundtableDbId,
             agent_id: research.agentId,
             agent_name: agent?.name || research.agentId,
@@ -766,19 +756,36 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
             findings: research.findings,
             status: research.status
           });
+          
+          if (error) {
+            console.error('[v0] Research insert error for', agent?.name, ':', error);
+            throw error;
+          } else {
+            console.log('[v0] Research saved for', agent?.name);
+          }
         }
         
         // Update session status
-        await supabase.from('roundtable_sessions').update({
+        const { error: updateError } = await supabase.from('roundtable_sessions').update({
           status: 'researching'
         }).eq('id', roundtableDbId);
         
-        console.log('[v0] Research saved to database');
+        if (updateError) {
+          console.error('[v0] Session update error:', updateError);
+        }
+        
+        console.log('[v0] All research saved to database successfully');
         pushLog('SYSTEM', 'SUCCESS', 'Research saved to database');
       } catch (e: any) {
         console.error('[v0] Failed to save research:', e);
         pushLog('SYSTEM', 'ERROR', `Failed to save research: ${e.message}`);
       }
+    } else {
+      console.warn('[v0] Cannot save research - missing:', {
+        hasDbId: !!roundtableDbId,
+        hasSupabase: !!supabase,
+        hasSession: !!roundtableSession
+      });
     }
     
     setRoundtableSession(prev => prev ? { ...prev, status: 'researching' } : null);
@@ -866,7 +873,7 @@ Your response (plain text only):`;
       
       try {
         const result = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-preview-05-20',
+          model: 'gemini-2.0-flash-exp',
           contents: prompt
         });
         
@@ -1005,7 +1012,7 @@ Format in markdown with headers (##) and bullet points.`;
 
       console.log('[v0] Oracle - Sending summary prompt to Gemini...');
       const result = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash-exp',
         contents: prompt
       });
       const summary = result.text || 'Summary not available';
@@ -1082,7 +1089,7 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
 
       console.log(`[v0] Sending research request to Gemini 3...`);
       const result = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash-exp',
         contents: prompt
       });
       

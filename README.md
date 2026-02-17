@@ -79,6 +79,7 @@ To enable session persistence with Supabase:
 - **React 19** - UI library
 - **TypeScript** - Type safety
 - **Tailwind CSS** - Styling
+- **Google Gemini 3** - Advanced AI model for agent intelligence ([Learn more](https://deepmind.google/models/gemini/pro/))
 - **Google GenAI SDK** - AI agent communication
 - **Web Audio API** - Audio processing
 - **Supabase** (optional) - Database for session persistence
