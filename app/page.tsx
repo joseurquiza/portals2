@@ -2275,6 +2275,13 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
               )}
 
               {/* Summary Phase */}
+              {roundtableSession.status === 'summarizing' && !roundtableSession.summary && (
+                <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 backdrop-blur-sm border border-purple-500/30 rounded-2xl p-6 text-center">
+                  <div className="animate-spin w-8 h-8 border-2 border-purple-400 border-t-transparent rounded-full mx-auto mb-3" />
+                  <p className="text-purple-300 font-semibold">Generating Board Summary...</p>
+                  <p className="text-xs text-white/40 mt-1">Oracle is synthesizing the discussion</p>
+                </div>
+              )}
               {roundtableSession.summary && (
                 <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 backdrop-blur-sm border border-purple-500/30 rounded-2xl p-6">
                   <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
