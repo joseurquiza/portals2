@@ -1307,14 +1307,7 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                   Start Board Meeting
                   <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 opacity-0 group-hover:opacity-100 transition-opacity -z-10 blur-xl" />
                 </button>
-                {walletAddress && pastSessions.length > 0 && (
-                  <button 
-                    onClick={() => setShowHistory(true)}
-                    className="px-8 py-4 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 hover:border-purple-500/50 text-purple-300 font-semibold rounded-xl transition-all backdrop-blur-sm"
-                  >
-                    View Past Sessions ({pastSessions.length})
-                  </button>
-                )}
+
                 <button 
                   onClick={() => setShowKnowledgeBase(true)}
                   className="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white font-semibold rounded-xl transition-all backdrop-blur-sm"
@@ -1401,88 +1394,116 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
         </div>
       )}
 
-      {/* Session History Modal */}
-      {showHistory && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-4xl w-full max-h-[80vh] overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold font-outfit">Past Roundtable Sessions</h2>
-              <button 
-                onClick={() => setShowHistory(false)}
-                className="text-white/60 hover:text-white transition"
-              >
-                ✕
-              </button>
-            </div>
-            
-            {pastSessions.length === 0 ? (
-              <p className="text-white/40 text-center py-8">No past sessions found. Start your first roundtable discussion!</p>
-            ) : (
-              <div className="space-y-4">
-                {pastSessions.map((session) => (
-                  <div 
-                    key={session.id}
-                    className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition cursor-pointer"
-                    onClick={async () => {
-                      const details = await loadSessionDetails(session.id);
-                      console.log('[v0] Session details:', details);
-                      // TODO: Display session details in expanded view
-                    }}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <h3 className="font-semibold text-lg">{session.topic}</h3>
-                      <span className={`text-xs px-2 py-1 rounded ${
-                        session.status === 'complete' ? 'bg-green-500/20 text-green-400' :
-                        session.status === 'stopped' ? 'bg-red-500/20 text-red-400' :
-                        'bg-yellow-500/20 text-yellow-400'
-                      }`}>
-                        {session.status}
-                      </span>
-                    </div>
-                    <p className="text-sm text-white/60">
-                      {new Date(session.created_at).toLocaleString()}
-                    </p>
-                    {session.summary && (
-                      <p className="text-sm text-white/80 mt-2 line-clamp-2">{session.summary}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Roundtable Input Modal */}
       {showRoundtableInput && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-2xl w-full shadow-2xl">
-            <h2 className="text-2xl font-bold mb-4 font-outfit">Start a Roundtable Discussion</h2>
-            <p className="text-sm text-white/60 mb-6">
-              All five agents will research your topic, discuss their findings with each other, and provide a comprehensive summary.
-            </p>
-            <textarea
-              placeholder="Enter your topic or question..."
-              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-6 h-32 focus:outline-none focus:border-cyan-500 transition resize-none"
-              id="roundtable-topic"
-            />
-            <div className="flex gap-3">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-3xl w-full shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold font-outfit">Board Meeting</h2>
+              <button 
+                onClick={() => setShowRoundtableInput(false)}
+                className="text-white/60 hover:text-white transition text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* New Discussion */}
+            <div className="mb-8">
+              <h3 className="text-sm font-semibold text-white/40 uppercase tracking-wider mb-3">New Discussion</h3>
+              <p className="text-sm text-white/60 mb-4">
+                All five agents will research your topic, discuss their findings, and provide a summary.
+              </p>
+              <textarea
+                placeholder="Enter your topic or question..."
+                className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 mb-4 h-28 focus:outline-none focus:border-cyan-500 transition resize-none text-base"
+                id="roundtable-topic"
+              />
               <button 
                 onClick={() => {
                   const input = document.getElementById('roundtable-topic') as HTMLTextAreaElement;
                   if (input?.value.trim()) startRoundtable(input.value);
                 }}
-                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold py-3 rounded-lg transition"
+                className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-semibold py-3 rounded-lg transition"
               >
                 Begin Roundtable
               </button>
-              <button 
-                onClick={() => setShowRoundtableInput(false)}
-                className="px-6 bg-white/10 hover:bg-white/20 rounded-lg transition"
-              >
-                Cancel
-              </button>
             </div>
+
+            {/* Past Sessions */}
+            {pastSessions.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-white/40 uppercase tracking-wider mb-3">Past Sessions</h3>
+                <div className="space-y-3">
+                  {pastSessions.map((session) => (
+                    <div 
+                      key={session.id}
+                      className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition group"
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <h4 className="font-semibold text-sm flex-1">{session.topic}</h4>
+                        <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${
+                          session.status === 'complete' ? 'bg-green-500/20 text-green-400' :
+                          session.status === 'stopped' ? 'bg-red-500/20 text-red-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                          {session.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-white/40 mb-2">
+                        {new Date(session.created_at).toLocaleString()}
+                      </p>
+                      {session.summary && (
+                        <p className="text-xs text-white/60 line-clamp-2 mb-3">{session.summary}</p>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            const input = document.getElementById('roundtable-topic') as HTMLTextAreaElement;
+                            if (input) input.value = session.topic;
+                          }}
+                          className="text-xs bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg transition"
+                        >
+                          Reuse Topic
+                        </button>
+                        <button
+                          onClick={async () => {
+                            const details = await loadSessionDetails(session.id);
+                            if (details?.research) {
+                              // Restore the session with its research so user can start discussion
+                              const restoredSession: RoundtableSession = {
+                                topic: session.topic,
+                                research: details.research.map((r: any) => ({
+                                  agentId: r.agent_id,
+                                  findings: r.findings,
+                                  status: 'complete' as const
+                                })),
+                                discussions: details.discussions?.map((d: any) => ({
+                                  fromAgentId: d.from_agent_id,
+                                  toAgentId: d.to_agent_id,
+                                  message: d.message,
+                                  timestamp: new Date(d.created_at).getTime()
+                                })) || [],
+                                summary: session.summary || undefined,
+                                status: 'researching'
+                              };
+                              setRoundtableSession(restoredSession);
+                              setRoundtableDbId(session.id);
+                              setShowRoundtableInput(false);
+                              pushLog('SYSTEM', 'SUCCESS', `Restored session: ${session.topic}`);
+                            }
+                          }}
+                          className="text-xs bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 px-3 py-1.5 rounded-lg transition"
+                        >
+                          Resume Session
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
