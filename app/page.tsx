@@ -1034,19 +1034,27 @@ SPEAK NATURALLY. BE DIRECT. BE BRIEF.`;
         .map(d => `${AGENTS.find(a => a.id === d.fromAgentId)?.name}: ${d.message}`)
         .join('\n\n');
       
-      const prompt = `You are Oracle, synthesizing a roundtable discussion on: "${roundtableSession.topic}"
+      console.log('[v0] Summary input - Research entries:', roundtableSession.research.length);
+      console.log('[v0] Summary input - Discussion entries:', roundtableSession.discussions.length);
+      console.log('[v0] Summary input - Research preview:', allResearch.substring(0, 200));
+      console.log('[v0] Summary input - Discussion preview:', allDiscussions.substring(0, 200));
+      
+      const hasDiscussion = allDiscussions.trim().length > 0;
+      
+      const prompt = `You are Oracle, the Chairman synthesizing a board meeting on: "${roundtableSession.topic}"
 
-RESEARCH FINDINGS:
+RESEARCH FINDINGS FROM BOARD MEMBERS:
 ${allResearch}
 
-DISCUSSION:
-${allDiscussions}
+${hasDiscussion ? `BOARD DISCUSSION TRANSCRIPT:\n${allDiscussions}` : 'NOTE: No live discussion was recorded for this session.'}
+
+IMPORTANT: Only summarize what is ACTUALLY in the research and discussion above. Do NOT invent or hallucinate information that was not provided. If a topic was not discussed, do not mention it.
 
 Provide a comprehensive summary that:
-1. Captures key insights from each agent's unique perspective
-2. Highlights areas of consensus and creative tension
-3. Offers actionable takeaways
-4. Uses clear section headers
+1. Captures key insights from each board member's research
+${hasDiscussion ? '2. Highlights key points from the live discussion\n3. Notes areas of agreement and disagreement' : '2. Synthesizes the research into actionable insights'}
+4. Offers concrete, actionable recommendations
+5. Uses clear section headers
 
 Format in markdown with headers (##) and bullet points.`;
 
