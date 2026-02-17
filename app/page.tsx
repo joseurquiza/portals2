@@ -305,20 +305,32 @@ const App: React.FC = () => {
       console.log('[v0] Loaded', docs.length, 'documents');
     }
     
-    // Load user's past roundtable sessions
-    const { data: sessions } = await supabase
-      .from('roundtable_sessions')
-      .select(`
-        *,
-        user_roundtable_sessions!inner(wallet_address)
-      `)
-      .eq('user_roundtable_sessions.wallet_address', walletAddr)
-      .order('created_at', { ascending: false })
-      .limit(10);
+    // Load user's past roundtable sessions via the link table
+    const { data: links, error: linksError } = await supabase
+      .from('user_roundtable_sessions')
+      .select('id')
+      .eq('wallet_address', walletAddr);
     
-    if (sessions) {
-      setPastSessions(sessions);
-      console.log('[v0] Loaded', sessions.length, 'past sessions');
+    if (linksError) {
+      console.error('[v0] Failed to load session links:', linksError);
+    }
+    
+    if (links && links.length > 0) {
+      const sessionIds = links.map((l: any) => l.id);
+      const { data: sessions } = await supabase
+        .from('roundtable_sessions')
+        .select('*')
+        .in('id', sessionIds)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (sessions) {
+        setPastSessions(sessions);
+        console.log('[v0] Loaded', sessions.length, 'past sessions');
+      }
+    } else {
+      console.log('[v0] No past sessions found for wallet');
+      setPastSessions([]);
     }
     
     pushLog('SYSTEM', 'INFO', 'Loaded your personal workspace');
@@ -1090,15 +1102,17 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
           setRoundtableDbId(sessionData.id);
           console.log('[v0] Database session created:', sessionData.id);
           
-          // Link session to user if wallet connected
-          if (walletAddress && userId) {
-            await supabase.from('user_roundtable_sessions').insert({
-              id: sessionData.id,
-              user_id: userId,
-              wallet_address: walletAddress
-            });
-            console.log('[v0] Session linked to user');
-          }
+  // Link session to user wallet
+  if (walletAddress) {
+  const linkPayload: any = { id: sessionData.id, wallet_address: walletAddress };
+  if (userId) linkPayload.user_id = userId;
+  const { error: linkError } = await supabase.from('user_roundtable_sessions').insert(linkPayload);
+  if (linkError) {
+    console.error('[v0] Failed to link session to wallet:', linkError);
+  } else {
+    console.log('[v0] Session linked to wallet:', walletAddress);
+  }
+  }
         }
       } catch (e: any) {
         console.error('[v0] Failed to create database session:', e);
@@ -1501,8 +1515,7 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                             disabled={researchingPerson}
                           />
         <button
-          onClick={connectWallet}
-          disabled={!!walletAddress}
+          onClick={handleWalletAction}
           className={`backdrop-blur-md border px-6 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-2 ${
             walletAddress 
               ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30' 
