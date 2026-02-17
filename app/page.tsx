@@ -155,7 +155,18 @@ const searchKnowledgeDeclaration: FunctionDeclaration = {
   },
 };
 
+const APP_VERSION = 'TEXT-DISCUSSION-v2.0'; // Text-based sequential discussion
+
 const App: React.FC = () => {
+  // Log version on mount to verify correct code is running
+  useEffect(() => {
+    console.log('='.repeat(60));
+    console.log('[v0] APP VERSION:', APP_VERSION);
+    console.log('[v0] Discussion system: TEXT-BASED (sequential, not voice)');
+    console.log('[v0] If you see voice/audio logs, hard refresh browser');
+    console.log('='.repeat(60));
+  }, []);
+  
   const [view, setView] = useState<'home' | 'portal' | 'roundtable'>('home');
   const [activeAgent, setActiveAgent] = useState<AgentConfig>(AGENTS[0]);
   const [collaborators, setCollaborators] = useState<AgentConfig[]>([]);
