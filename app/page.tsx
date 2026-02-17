@@ -1433,7 +1433,8 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                                   timestamp: new Date(d.created_at).getTime()
                                 })) || [],
                                 summary: session.summary || undefined,
-                                status: 'researching'
+                                status: 'researching',
+                                startTime: new Date(session.created_at).getTime()
                               };
                               setRoundtableSession(restoredSession);
                               setRoundtableDbId(session.id);
