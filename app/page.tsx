@@ -256,32 +256,53 @@ const App: React.FC = () => {
   }, [pushLog]);
 
   const connectWallet = async () => {
+    console.log('[v0] Attempting to connect to Phantom wallet...');
     try {
-      if (typeof window !== 'undefined' && (window as any).phantom?.solana) {
-        const phantom = (window as any).phantom.solana;
-        const response = await phantom.connect();
-        const address = response.publicKey.toString();
-        setWalletAddress(address);
+      if (typeof window === 'undefined') {
+        throw new Error('Window is undefined - not in browser context');
+      }
+      
+      const solana = (window as any).solana || (window as any).phantom?.solana;
+      console.log('[v0] Solana provider check:', { 
+        hasSolana: !!(window as any).solana, 
+        hasPhantom: !!(window as any).phantom,
+        isPhantom: solana?.isPhantom 
+      });
+      
+      if (!solana) {
+        pushLog('SYSTEM', 'ERROR', 'Phantom wallet not detected. Please install Phantom extension.');
+        window.open('https://phantom.app/', '_blank');
+        return;
+      }
+      
+      if (!solana.isPhantom) {
+        pushLog('SYSTEM', 'ERROR', 'Not a Phantom wallet');
+        return;
+      }
+      
+      console.log('[v0] Calling phantom.connect()...');
+      const response = await solana.connect();
+      console.log('[v0] Connect response:', response);
+      
+      const address = response.publicKey.toString();
+      setWalletAddress(address);
         
-        // Create or get user profile
-        if (supabase) {
-          const { data, error } = await supabase.rpc('get_or_create_user', {
-            p_wallet_address: address
-          });
+      // Create or get user profile
+      if (supabase) {
+        const { data, error } = await supabase.rpc('get_or_create_user', {
+          p_wallet_address: address
+        });
+        
+        if (error) {
+          console.error('[v0] Failed to create user profile:', error);
+        } else {
+          setUserId(data);
+          console.log('[v0] User profile loaded:', data);
+          pushLog('SYSTEM', 'SUCCESS', `Connected: ${address.slice(0, 4)}...${address.slice(-4)}`);
           
-          if (error) {
-            console.error('[v0] Failed to create user profile:', error);
-          } else {
-            setUserId(data);
-            console.log('[v0] User profile loaded:', data);
-            pushLog('SYSTEM', 'SUCCESS', `Connected: ${address.slice(0, 4)}...${address.slice(-4)}`);
-            
-            // Load user's data
-            await loadUserData(address);
-          }
+          // Load user's data
+          await loadUserData(address);
         }
-      } else {
-        pushLog('SYSTEM', 'ERROR', 'Phantom wallet not installed');
       }
     } catch (error) {
       pushLog('SYSTEM', 'ERROR', 'Failed to connect wallet');
@@ -1412,7 +1433,8 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                                   timestamp: new Date(d.created_at).getTime()
                                 })) || [],
                                 summary: session.summary || undefined,
-                                status: 'researching'
+                                status: 'researching',
+                                startTime: new Date(session.created_at).getTime()
                               };
                               setRoundtableSession(restoredSession);
                               setRoundtableDbId(session.id);
