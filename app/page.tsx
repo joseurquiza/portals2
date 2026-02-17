@@ -1379,7 +1379,8 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                   >
                     Past Meetings ({pastSessions.length})
                   </button>
-              )}
+                )}
+              </div>
             </div>
           </div>
           
@@ -1489,8 +1490,8 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
               </div>
             </div>
           )}
-        </main>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
