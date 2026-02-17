@@ -169,6 +169,8 @@ const App: React.FC = () => {
   const [roundtableDbId, setRoundtableDbId] = useState<string | null>(null);
   const [isDiscussionRunning, setIsDiscussionRunning] = useState(false);
   const [shouldStopDiscussion, setShouldStopDiscussion] = useState(false);
+  const [pastSessions, setPastSessions] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   
   const [agentPersonalities, setAgentPersonalities] = useState<AgentPersonality[]>(
     AGENTS.map(agent => ({ agentId: agent.id, presetId: 'default', customTraits: '' }))
@@ -303,7 +305,41 @@ const App: React.FC = () => {
       console.log('[v0] Loaded', docs.length, 'documents');
     }
     
+    // Load user's past roundtable sessions
+    const { data: sessions } = await supabase
+      .from('roundtable_sessions')
+      .select(`
+        *,
+        user_roundtable_sessions!inner(wallet_address)
+      `)
+      .eq('user_roundtable_sessions.wallet_address', walletAddr)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    if (sessions) {
+      setPastSessions(sessions);
+      console.log('[v0] Loaded', sessions.length, 'past sessions');
+    }
+    
     pushLog('SYSTEM', 'INFO', 'Loaded your personal workspace');
+  };
+  
+  const loadSessionDetails = async (sessionId: string) => {
+    if (!supabase) return;
+    
+    // Load research and discussions for this session
+    const { data: research } = await supabase
+      .from('roundtable_research')
+      .select('*')
+      .eq('session_id', sessionId);
+    
+    const { data: discussions } = await supabase
+      .from('roundtable_discussions')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true });
+    
+    return { research, discussions };
   };
 
   const disconnectWallet = async () => {
@@ -1271,6 +1307,14 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                   Start Board Meeting
                   <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 opacity-0 group-hover:opacity-100 transition-opacity -z-10 blur-xl" />
                 </button>
+                {walletAddress && pastSessions.length > 0 && (
+                  <button 
+                    onClick={() => setShowHistory(true)}
+                    className="px-8 py-4 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 hover:border-purple-500/50 text-purple-300 font-semibold rounded-xl transition-all backdrop-blur-sm"
+                  >
+                    View Past Sessions ({pastSessions.length})
+                  </button>
+                )}
                 <button 
                   onClick={() => setShowKnowledgeBase(true)}
                   className="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white font-semibold rounded-xl transition-all backdrop-blur-sm"
@@ -1353,6 +1397,58 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                 <span className="text-white/70 group-hover:text-white transition-colors">📚 Knowledge Base</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Session History Modal */}
+      {showHistory && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-gradient-to-br from-slate-900 to-black border border-white/20 rounded-2xl p-8 max-w-4xl w-full max-h-[80vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold font-outfit">Past Roundtable Sessions</h2>
+              <button 
+                onClick={() => setShowHistory(false)}
+                className="text-white/60 hover:text-white transition"
+              >
+                ✕
+              </button>
+            </div>
+            
+            {pastSessions.length === 0 ? (
+              <p className="text-white/40 text-center py-8">No past sessions found. Start your first roundtable discussion!</p>
+            ) : (
+              <div className="space-y-4">
+                {pastSessions.map((session) => (
+                  <div 
+                    key={session.id}
+                    className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition cursor-pointer"
+                    onClick={async () => {
+                      const details = await loadSessionDetails(session.id);
+                      console.log('[v0] Session details:', details);
+                      // TODO: Display session details in expanded view
+                    }}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-semibold text-lg">{session.topic}</h3>
+                      <span className={`text-xs px-2 py-1 rounded ${
+                        session.status === 'complete' ? 'bg-green-500/20 text-green-400' :
+                        session.status === 'stopped' ? 'bg-red-500/20 text-red-400' :
+                        'bg-yellow-500/20 text-yellow-400'
+                      }`}>
+                        {session.status}
+                      </span>
+                    </div>
+                    <p className="text-sm text-white/60">
+                      {new Date(session.created_at).toLocaleString()}
+                    </p>
+                    {session.summary && (
+                      <p className="text-sm text-white/80 mt-2 line-clamp-2">{session.summary}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
