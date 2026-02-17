@@ -751,14 +751,17 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     
     // Save research to database with queries
     if (roundtableDbId && supabase && roundtableSession) {
-      console.log('[v0] Saving research to database...');
+      console.log('[v0] Saving research to database...', {
+        sessionId: roundtableDbId,
+        researchCount: roundtableSession.research.length
+      });
       try {
         for (const research of roundtableSession.research) {
           const agent = AGENTS.find(a => a.id === research.agentId);
-          // Reconstruct the query that was used
           const query = `You are ${agent?.name}. ${agent?.description}\n\nResearch this topic from your unique perspective: "${roundtableSession.topic}"\n\nProvide your key findings in 2-3 sentences. Focus on insights relevant to your specialty.`;
           
-          await supabase.from('roundtable_research').insert({
+          console.log('[v0] Inserting research for:', agent?.name);
+          const { data, error } = await supabase.from('roundtable_research').insert({
             session_id: roundtableDbId,
             agent_id: research.agentId,
             agent_name: agent?.name || research.agentId,
@@ -766,19 +769,36 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
             findings: research.findings,
             status: research.status
           });
+          
+          if (error) {
+            console.error('[v0] Research insert error for', agent?.name, ':', error);
+            throw error;
+          } else {
+            console.log('[v0] Research saved for', agent?.name);
+          }
         }
         
         // Update session status
-        await supabase.from('roundtable_sessions').update({
+        const { error: updateError } = await supabase.from('roundtable_sessions').update({
           status: 'researching'
         }).eq('id', roundtableDbId);
         
-        console.log('[v0] Research saved to database');
+        if (updateError) {
+          console.error('[v0] Session update error:', updateError);
+        }
+        
+        console.log('[v0] All research saved to database successfully');
         pushLog('SYSTEM', 'SUCCESS', 'Research saved to database');
       } catch (e: any) {
         console.error('[v0] Failed to save research:', e);
         pushLog('SYSTEM', 'ERROR', `Failed to save research: ${e.message}`);
       }
+    } else {
+      console.warn('[v0] Cannot save research - missing:', {
+        hasDbId: !!roundtableDbId,
+        hasSupabase: !!supabase,
+        hasSession: !!roundtableSession
+      });
     }
     
     setRoundtableSession(prev => prev ? { ...prev, status: 'researching' } : null);
