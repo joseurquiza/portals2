@@ -1515,8 +1515,7 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                             disabled={researchingPerson}
                           />
         <button
-          onClick={connectWallet}
-          disabled={!!walletAddress}
+          onClick={handleWalletAction}
           className={`backdrop-blur-md border px-6 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-2 ${
             walletAddress 
               ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30' 
