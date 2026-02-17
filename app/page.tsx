@@ -1000,15 +1000,18 @@ SPEAK NATURALLY. BE DIRECT. BE BRIEF.`;
     agentInputMixersRef.current.clear();
     
     setStatus(ConnectionStatus.IDLE);
-    pushLog('SYSTEM', 'INFO', 'Discussion stopped');
+    pushLog('SYSTEM', 'INFO', 'Discussion ended. Generating summary...');
     
     // Update database
     if (roundtableDbId && supabase) {
       await supabase.from('roundtable_sessions').update({
-        status: 'stopped',
+        status: 'summarizing',
         end_time: new Date().toISOString()
       }).eq('id', roundtableDbId);
     }
+    
+    // Automatically generate summary
+    setTimeout(() => generateSummary(), 500);
   };
 
   const generateSummary = async () => {
