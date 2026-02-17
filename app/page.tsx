@@ -825,29 +825,34 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
       const personalityPreset = PERSONALITY_PRESETS.find(p => p.id === personality?.presetId);
       const personalityTraits = personality?.customTraits || personalityPreset?.traits || '';
       
-      const systemInstruction = `You are ${agent.name}, a board member with expertise in ${agent.description}.
+      const systemInstruction = `You are ${agent.name}. You are speaking out loud in a board meeting.
 
-You are in a live board discussion about: "${roundtableSession?.topic}"
+TOPIC: "${roundtableSession?.topic}"
 
-Your research findings: ${agentResearch?.findings}
+YOUR BACKGROUND: ${agentResearch?.findings}
 
-${personalityTraits ? `Your personality and style: ${personalityTraits}\n\n` : ''}
+${personalityTraits ? `YOUR STYLE: ${personalityTraits}\n` : ''}OTHER MEMBERS: ${AGENTS.filter(a => a.id !== agent.id).map(a => a.name).join(', ')}
 
-Other board members: ${AGENTS.filter(a => a.id !== agent.id).map(a => a.name).join(', ')}
+OUTPUT FORMAT RULES - THIS IS CRITICAL:
+- You are generating SPEECH AUDIO. Everything you output will be spoken aloud.
+- NEVER output markdown formatting like **bold**, headers, or bullet points.
+- NEVER narrate your thoughts. NEVER say "I'm analyzing", "I'm focusing", "I'm synthesizing", "My research shows".
+- NEVER use prefixes like "Analyzing Strategic Shifts" or "Framing the Opportunity".
+- Just TALK like a human in a meeting room.
 
-HOW TO PARTICIPATE:
-- You will receive messages showing what other board members say in real-time
-- When you receive a message, respond naturally if:
-  * Someone addresses you by name
-  * The topic relates to your expertise (${agent.description})
-  * You have a relevant insight to add
-- Keep responses conversational and brief (1-3 sentences)
-- Speak directly to the board: "I think...", "The key issue is...", "${AGENTS[0].name}, regarding..."
-- NO INTERNAL MONOLOGUE: Never say "I'm analyzing", "I'm observing", "I'm formulating"
+GOOD examples of what to say:
+"I think we should focus on brand loyalty now that the patent is expiring."
+"Chairman, I disagree. The financials don't support that timeline."
+"That's a great point. From a legal standpoint, we also need to consider compliance."
 
-${agent.id === 'oracle' ? 'As Chairman, you will open the discussion. Introduce the topic and your perspective, then invite others to contribute.' : 'Listen to what others say and contribute when relevant to your expertise.'}
+BAD examples - NEVER do this:
+"**Analyzing Strategic Shifts** I'm now focusing on the implications..."
+"I'm currently synthesizing the board members' perspectives..."
+"My analysis, prompted by the Chairman, centers on..."
 
-SPEAK NATURALLY. BE DIRECT. BE BRIEF.`;
+${agent.id === 'oracle' ? 'You are the Chairman. Open the meeting, state the topic, share your view, then ask others for input.' : 'When you receive a message from another board member, respond conversationally if relevant to your expertise.'}
+
+Keep responses to 1-3 spoken sentences. Talk like a real person.`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -886,8 +891,18 @@ SPEAK NATURALLY. BE DIRECT. BE BRIEF.`;
               };
             }
             
-            const textContent = message.serverContent?.modelTurn?.parts?.find(p => p.text)?.text;
-            if (textContent) {
+            const rawText = message.serverContent?.modelTurn?.parts?.find(p => p.text)?.text;
+            if (rawText) {
+              // Strip markdown formatting and internal monologue prefixes
+              const textContent = rawText
+                .replace(/\*\*[^*]+\*\*\n?/g, '')  // Remove **bold headers**
+                .replace(/^#+\s.+$/gm, '')           // Remove # headers
+                .replace(/^\s*[-*]\s/gm, '')          // Remove bullet points
+                .replace(/I'm (now |currently )?(focusing|analyzing|synthesizing|formulating|observing|integrating|reviewing|prioritizing|honing|zeroing|immersed|ready|pleased)[^.]*\.\s*/gi, '')
+                .trim();
+              
+              if (!textContent) return; // Skip empty after stripping
+              
               currentOutputBuffer += textContent;
               console.log(`[v0] ${agent.name}: ${textContent}`);
               
