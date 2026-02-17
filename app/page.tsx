@@ -1012,7 +1012,7 @@ Format in markdown with headers (##) and bullet points.`;
 
       console.log('[v0] Oracle - Sending summary prompt to Gemini...');
       const result = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash-exp',
         contents: prompt
       });
       const summary = result.text || 'Summary not available';
@@ -1089,7 +1089,7 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
 
       console.log(`[v0] Sending research request to Gemini 3...`);
       const result = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash-exp',
         contents: prompt
       });
       
