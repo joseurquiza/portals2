@@ -287,25 +287,22 @@ const App: React.FC = () => {
       const address = response.publicKey.toString();
       setWalletAddress(address);
         
-        // Create or get user profile
-        if (supabase) {
-          const { data, error } = await supabase.rpc('get_or_create_user', {
-            p_wallet_address: address
-          });
+      // Create or get user profile
+      if (supabase) {
+        const { data, error } = await supabase.rpc('get_or_create_user', {
+          p_wallet_address: address
+        });
+        
+        if (error) {
+          console.error('[v0] Failed to create user profile:', error);
+        } else {
+          setUserId(data);
+          console.log('[v0] User profile loaded:', data);
+          pushLog('SYSTEM', 'SUCCESS', `Connected: ${address.slice(0, 4)}...${address.slice(-4)}`);
           
-          if (error) {
-            console.error('[v0] Failed to create user profile:', error);
-          } else {
-            setUserId(data);
-            console.log('[v0] User profile loaded:', data);
-            pushLog('SYSTEM', 'SUCCESS', `Connected: ${address.slice(0, 4)}...${address.slice(-4)}`);
-            
-            // Load user's data
-            await loadUserData(address);
-          }
+          // Load user's data
+          await loadUserData(address);
         }
-      } else {
-        pushLog('SYSTEM', 'ERROR', 'Phantom wallet not installed');
       }
     } catch (error) {
       pushLog('SYSTEM', 'ERROR', 'Failed to connect wallet');
