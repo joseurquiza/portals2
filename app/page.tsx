@@ -706,7 +706,7 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
 
         console.log(`[v0] ${agent.name} - Sending research prompt to Gemini...`);
         const result = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-2.0-flash-exp',
           contents: prompt
         });
         const findings = result.text || 'No findings available';
@@ -873,7 +873,7 @@ Your response (plain text only):`;
       
       try {
         const result = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-preview-05-20',
+          model: 'gemini-2.0-flash-exp',
           contents: prompt
         });
         
