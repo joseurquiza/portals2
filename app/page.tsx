@@ -1416,8 +1416,17 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                         </button>
                         <button
                           onClick={async () => {
-                            const details = await loadSessionDetails(session.id);
-                            if (details?.research) {
+                            console.log('[v0] Resume Session clicked for:', session.id);
+                            try {
+                              const details = await loadSessionDetails(session.id);
+                              console.log('[v0] Session details loaded:', details);
+                              
+                              if (!details?.research || details.research.length === 0) {
+                                pushLog('SYSTEM', 'ERROR', 'No research found for this session');
+                                console.error('[v0] No research data in session:', session.id);
+                                return;
+                              }
+                              
                               // Restore the session with its research so user can start discussion
                               const restoredSession: RoundtableSession = {
                                 topic: session.topic,
@@ -1436,10 +1445,14 @@ Make it specific and actionable for AI agent behavior. Include actual quotes or 
                                 status: 'researching',
                                 startTime: new Date(session.created_at).getTime()
                               };
+                              console.log('[v0] Restored session:', restoredSession);
                               setRoundtableSession(restoredSession);
                               setRoundtableDbId(session.id);
                               setShowRoundtableInput(false);
                               pushLog('SYSTEM', 'SUCCESS', `Restored session: ${session.topic}`);
+                            } catch (error) {
+                              console.error('[v0] Error resuming session:', error);
+                              pushLog('SYSTEM', 'ERROR', 'Failed to resume session');
                             }
                           }}
                           className="text-xs bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 px-3 py-1.5 rounded-lg transition"
