@@ -691,7 +691,7 @@ const App: React.FC = () => {
     pushLog('SYSTEM', 'INFO', 'All agents researching in parallel...');
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     
-    // All agents research simultaneously
+    // All agents research simultaneously and save immediately
     const researchPromises = AGENTS.map(async (agent) => {
       console.log(`[v0] ${agent.name} starting research...`);
       
@@ -711,6 +711,35 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
         });
         const findings = result.text || 'No findings available';
         console.log(`[v0] ${agent.name} - Research complete:`, findings.substring(0, 100) + '...');
+        
+        // SAVE IMMEDIATELY to database
+        if (roundtableDbId && supabase) {
+          console.log(`[v0] ${agent.name} - Saving to DB immediately...`, {
+            sessionId: roundtableDbId,
+            findingsLength: findings.length
+          });
+          
+          const { data, error } = await supabase.from('roundtable_research').insert({
+            session_id: roundtableDbId,
+            agent_id: agent.id,
+            agent_name: agent.name,
+            query: prompt,
+            findings: findings,
+            status: 'complete'
+          });
+          
+          if (error) {
+            console.error(`[v0] ${agent.name} - DB INSERT FAILED:`, error);
+            pushLog('SYSTEM', 'ERROR', `${agent.name} failed to save research: ${error.message}`);
+          } else {
+            console.log(`[v0] ${agent.name} - DB INSERT SUCCESS`);
+          }
+        } else {
+          console.error(`[v0] ${agent.name} - CANNOT SAVE: No DB`, {
+            hasDbId: !!roundtableDbId,
+            hasSupabase: !!supabase
+          });
+        }
         
         pushLog('SYSTEM', 'SUCCESS', `${agent.name} completed research`);
         return { agentId: agent.id, findings, status: 'complete' as const, timestamp: Date.now() };
@@ -734,59 +763,8 @@ Provide your key findings in 2-3 sentences. Focus on insights relevant to your s
     });
     
     console.log('[v0] RESEARCH PHASE COMPLETE - All agents finished');
+    console.log('[v0] Research already saved inline during generation');
     setFocusedAgentId(null);
-    
-    // Save research to database with queries - use fresh results, not stale state
-    if (roundtableDbId && supabase && results.length > 0) {
-      console.log('[v0] Saving research to database...', {
-        sessionId: roundtableDbId,
-        researchCount: results.length
-      });
-      try {
-        for (const research of results) {
-          const agent = AGENTS.find(a => a.id === research.agentId);
-          const query = `You are ${agent?.name}. ${agent?.description}\n\nResearch this topic from your unique perspective: "${topic}"\n\nProvide your key findings in 2-3 sentences. Focus on insights relevant to your specialty.`;
-          
-          console.log('[v0] Inserting research for:', agent?.name);
-          const { data, error } = await supabase.from('roundtable_research').insert({
-            session_id: roundtableDbId,
-            agent_id: research.agentId,
-            agent_name: agent?.name || research.agentId,
-            query: query,
-            findings: research.findings,
-            status: research.status
-          });
-          
-          if (error) {
-            console.error('[v0] Research insert error for', agent?.name, ':', error);
-            throw error;
-          } else {
-            console.log('[v0] Research saved for', agent?.name);
-          }
-        }
-        
-        // Update session status
-        const { error: updateError } = await supabase.from('roundtable_sessions').update({
-          status: 'researching'
-        }).eq('id', roundtableDbId);
-        
-        if (updateError) {
-          console.error('[v0] Session update error:', updateError);
-        }
-        
-        console.log('[v0] All research saved to database successfully');
-        pushLog('SYSTEM', 'SUCCESS', 'Research saved to database');
-      } catch (e: any) {
-        console.error('[v0] Failed to save research:', e);
-        pushLog('SYSTEM', 'ERROR', `Failed to save research: ${e.message}`);
-      }
-    } else {
-      console.warn('[v0] Cannot save research - missing:', {
-        hasDbId: !!roundtableDbId,
-        hasSupabase: !!supabase,
-        hasSession: !!roundtableSession
-      });
-    }
     
     setRoundtableSession(prev => prev ? { ...prev, status: 'researching' } : null);
     pushLog('SYSTEM', 'INFO', 'Research complete. Click "Start Discussion" to begin board conversation.');
